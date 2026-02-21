@@ -26,6 +26,8 @@ if (typeof electron === "string") {
 const { app, BrowserWindow, dialog, ipcMain, Notification, shell } = electron;
 
 const QUALITY_OPTIONS = new Set(["best", "1080p", "720p", "480p", "240p", "144p"]);
+const COOKIE_BROWSERS = new Set(["chrome", "edge", "firefox", "brave"]);
+const DEFAULT_COOKIE_BROWSERS = ["chrome", "edge", "firefox", "brave"];
 const QUALITY_HEIGHT = {
   best: null,
   "1080p": 1080,
@@ -142,6 +144,44 @@ function isValidHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+function normalizeCookieBrowser(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (!COOKIE_BROWSERS.has(normalized)) {
+    throw new Error("Unsupported browser for cookies. Choose Chrome, Edge, Firefox, or Brave.");
+  }
+  return normalized;
+}
+
+function normalizeCookiesFile(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (!fs.existsSync(normalized)) {
+    throw new Error("Cookies file was not found.");
+  }
+  return normalized;
+}
+
+function needsBrowserCookies(stderrText) {
+  const message = String(stderrText || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("sign in to confirm you're not a bot") ||
+    message.includes("use --cookies-from-browser or --cookies for the authentication")
+  );
+}
+
+function isBrowserCookieAccessError(stderrText) {
+  const message = String(stderrText || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("failed to decrypt with dpapi") ||
+    message.includes("could not copy chrome cookie database") ||
+    message.includes("database is locked") ||
+    message.includes("failed to decrypt")
+  );
 }
 
 function normalizeRateLimit(input) {
@@ -533,6 +573,12 @@ function buildDownloadArgs({ job, strategy, ffmpegPath, effectiveRateLimit }) {
   const outputTemplate = path.join(job.outputFolder, "%(title)s.%(ext)s");
   const args = ["--newline", "--no-warnings", "--ignore-config", "--continue", "-o", outputTemplate];
 
+  if (job.cookiesFile) {
+    args.push("--cookies", job.cookiesFile);
+  } else if (job.cookieBrowser) {
+    args.push("--cookies-from-browser", job.cookieBrowser);
+  }
+
   if (effectiveRateLimit) {
     args.push("--limit-rate", effectiveRateLimit);
   }
@@ -896,6 +942,22 @@ ipcMain.handle("dialog:select-folder", async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle("dialog:select-cookies-file", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile"],
+    filters: [
+      { name: "Cookie Files", extensions: ["txt", "cookies"] },
+      { name: "All Files", extensions: ["*"] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});
+
 ipcMain.handle("video:get-jobs", async () => ({
   jobs: getSortedJobs(),
   runningJobId,
@@ -909,17 +971,48 @@ ipcMain.handle("settings:set-global-speed-limit", async (_event, value) => {
   return { success: true, globalSpeedLimit };
 });
 ipcMain.handle("video:fetch-info", async (_event, url) => {
-  const normalizedUrl = String(url || "").trim();
+  const request = typeof url === "string" ? { url } : url || {};
+  const normalizedUrl = String(request.url || "").trim();
   if (!isValidHttpUrl(normalizedUrl)) {
     throw new Error("Enter a valid video URL.");
   }
 
-  const { code, stdout, stderr } = await runYtDlpCommand(["-J", "--no-warnings", "--skip-download", normalizedUrl], {
+  const cookiesFile = normalizeCookiesFile(request.cookiesFile);
+  const cookieBrowser = cookiesFile ? "" : normalizeCookieBrowser(request.cookieBrowser);
+  const args = ["-J", "--no-warnings", "--skip-download", "--ignore-no-formats-error"];
+  if (cookiesFile) {
+    args.push("--cookies", cookiesFile);
+  } else if (cookieBrowser) {
+    args.push("--cookies-from-browser", cookieBrowser);
+  }
+  args.push(normalizedUrl);
+
+  const { code, stdout, stderr } = await runYtDlpCommand(args, {
     timeoutMs: 180000
   });
 
   if (code !== 0) {
-    throw new Error(stderr.trim() || "Failed to fetch video metadata.");
+    const message = stderr.trim() || "Failed to fetch video metadata.";
+    if (!cookieBrowser && !cookiesFile && needsBrowserCookies(message)) {
+      return {
+        ok: false,
+        reason: "cookies_required",
+        message:
+          "This video needs authentication from your signed-in browser session. Choose a browser and retry.",
+        supportedBrowsers: DEFAULT_COOKIE_BROWSERS
+      };
+    }
+    if (cookieBrowser && isBrowserCookieAccessError(message)) {
+      const browserName = cookieBrowser.charAt(0).toUpperCase() + cookieBrowser.slice(1);
+      return {
+        ok: false,
+        reason: "browser_cookies_failed",
+        message: `Could not read ${browserName} cookies on this system. Close the browser and retry, or use a cookies.txt file.`,
+        detail: message,
+        supportedBrowsers: DEFAULT_COOKIE_BROWSERS
+      };
+    }
+    throw new Error(message);
   }
 
   let metadata;
@@ -946,13 +1039,16 @@ ipcMain.handle("video:fetch-info", async (_event, url) => {
   }));
 
   return {
-    title: primaryEntry.title || metadata.title || "Untitled",
-    thumbnail: primaryEntry.thumbnail || metadata.thumbnail || "",
-    duration: primaryEntry.duration || metadata.duration || null,
-    extractor: metadata.extractor_key || metadata.extractor || "Unknown",
-    isPlaylist: Boolean(Array.isArray(metadata.entries)),
-    playlistCount: Array.isArray(metadata.entries) ? metadata.entries.length : 0,
-    formats
+    ok: true,
+    data: {
+      title: primaryEntry.title || metadata.title || "Untitled",
+      thumbnail: primaryEntry.thumbnail || metadata.thumbnail || "",
+      duration: primaryEntry.duration || metadata.duration || null,
+      extractor: metadata.extractor_key || metadata.extractor || "Unknown",
+      isPlaylist: Boolean(Array.isArray(metadata.entries)),
+      playlistCount: Array.isArray(metadata.entries) ? metadata.entries.length : 0,
+      formats
+    }
   };
 });
 
@@ -975,6 +1071,8 @@ ipcMain.handle("video:start-download", async (_event, payload) => {
   const allowPlaylist = Boolean(payload?.allowPlaylist);
   const perDownloadSpeedLimit = normalizeRateLimit(payload?.perDownloadSpeedLimit || "");
   const selectedFormatId = String(payload?.selectedFormatId || "auto").trim() || "auto";
+  const cookiesFile = normalizeCookiesFile(payload?.cookiesFile);
+  const cookieBrowser = cookiesFile ? "" : normalizeCookieBrowser(payload?.cookieBrowser);
 
   const playlistStart = allowPlaylist ? normalizePositiveInt(payload?.playlistStart) : null;
   const playlistEnd = allowPlaylist ? normalizePositiveInt(payload?.playlistEnd) : null;
@@ -991,6 +1089,8 @@ ipcMain.handle("video:start-download", async (_event, payload) => {
     mode,
     quality,
     selectedFormatId,
+    cookieBrowser,
+    cookiesFile,
     allowPlaylist,
     playlistStart,
     playlistEnd,

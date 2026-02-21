@@ -11,9 +11,10 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  fetchVideoInfo: (url) => ipcRenderer.invoke("video:fetch-info", url),
+  fetchVideoInfo: (payload) => ipcRenderer.invoke("video:fetch-info", payload),
   getJobs: () => ipcRenderer.invoke("video:get-jobs"),
   chooseDownloadFolder: () => ipcRenderer.invoke("dialog:select-folder"),
+  chooseCookiesFile: () => ipcRenderer.invoke("dialog:select-cookies-file"),
   downloadVideo: (payload) => ipcRenderer.invoke("video:start-download", payload),
   pauseDownload: (jobId) => ipcRenderer.invoke("video:pause-download", jobId),
   resumeDownload: (jobId) => ipcRenderer.invoke("video:resume-download", jobId),

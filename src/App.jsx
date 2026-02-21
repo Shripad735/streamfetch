@@ -11,7 +11,16 @@ import Input from "./components/ui/Input";
 
 const QUALITY_OPTIONS = ["best", "1080p", "720p", "480p", "240p", "144p"];
 const PROJECT_REPO_URL = "https://github.com/Shripad735/streamfetch";
+const YTDLP_COOKIE_EXPORT_GUIDE_URL = "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies";
+const RECOMMENDED_COOKIE_EXTENSION_URL =
+  "https://chromewebstore.google.com/detail/cclelndahbckbenkjhflpdbgdldlbecc?utm_source=item-share-cb";
 const THEME_STORAGE_KEY = "streamfetch-theme";
+const COOKIE_BROWSER_OPTIONS = [
+  { value: "chrome", label: "Chrome" },
+  { value: "edge", label: "Edge" },
+  { value: "firefox", label: "Firefox" },
+  { value: "brave", label: "Brave" }
+];
 
 function formatDuration(totalSeconds) {
   if (!totalSeconds || Number.isNaN(totalSeconds)) return "Unknown";
@@ -36,6 +45,20 @@ function App() {
   const [videoInfo, setVideoInfo] = useState(null);
   const [fetchingInfo, setFetchingInfo] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [cookieBrowser, setCookieBrowser] = useState("chrome");
+  const [activeCookieBrowser, setActiveCookieBrowser] = useState("");
+  const [activeCookiesFile, setActiveCookiesFile] = useState("");
+  const [cookiesFilePath, setCookiesFilePath] = useState("");
+  const [cookiePrompt, setCookiePrompt] = useState({
+    open: false,
+    message: "",
+    url: "",
+    supportedBrowsers: COOKIE_BROWSER_OPTIONS.map((item) => item.value),
+    detail: "",
+    canUseCookiesFile: false
+  });
+  const [cookieRetrying, setCookieRetrying] = useState(false);
+  const [cookieFileRetrying, setCookieFileRetrying] = useState(false);
 
   const [mode, setMode] = useState("video");
   const [quality, setQuality] = useState("best");
@@ -188,21 +211,195 @@ function App() {
       .slice(0, 40);
   }, [videoInfo, mode]);
 
+  const getBrowserLabel = useCallback((value) => {
+    const found = COOKIE_BROWSER_OPTIONS.find((item) => item.value === value);
+    return found ? found.label : value;
+  }, []);
+  const getFileName = useCallback((filePath) => {
+    const value = String(filePath || "");
+    if (!value) return "";
+    const parts = value.split(/[\\/]/);
+    return parts[parts.length - 1] || value;
+  }, []);
+
   const handleFetchInfo = async () => {
     if (!hasElectron) return;
     setErrorMessage("");
     setFetchingInfo(true);
     setVideoInfo(null);
+    setActiveCookieBrowser("");
+    setActiveCookiesFile("");
+    setCookiesFilePath("");
+    setCookiePrompt((prev) => ({ ...prev, open: false }));
 
     try {
-      const info = await window.electronAPI.fetchVideoInfo(url.trim());
+      const response = await window.electronAPI.fetchVideoInfo({ url: url.trim() });
+      if (!response?.ok && response?.reason === "cookies_required") {
+        const supportedBrowsers =
+          Array.isArray(response.supportedBrowsers) && response.supportedBrowsers.length > 0
+            ? response.supportedBrowsers
+            : COOKIE_BROWSER_OPTIONS.map((item) => item.value);
+        setCookieBrowser(supportedBrowsers[0]);
+        setCookiePrompt({
+          open: true,
+          message: response.message || "This video requires browser cookies.",
+          url: url.trim(),
+          supportedBrowsers,
+          detail: "",
+          canUseCookiesFile: false
+        });
+        pushToast({
+          type: "warn",
+          title: "Authentication Needed",
+          message: "Pick a browser to retry with your logged-in cookies."
+        });
+        return;
+      }
+
+      if (!response?.ok || !response?.data) {
+        throw new Error(response?.message || "Unable to fetch metadata.");
+      }
+
+      const info = response.data;
       setVideoInfo(info);
       setSelectedFormatId("auto");
+      setActiveCookieBrowser("");
+      setActiveCookiesFile("");
+      if (!Array.isArray(info.formats) || info.formats.length === 0) {
+        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
+        pushToast({
+          type: "warn",
+          title: "No Formats Found",
+          message: "This video may be DRM-protected or currently unavailable for direct download."
+        });
+      }
       pushToast({ type: "info", title: "Metadata Loaded", message: `Fetched ${info.title}` });
     } catch (error) {
       setErrorMessage(error.message || "Unable to fetch metadata.");
       pushToast({ type: "error", title: "Fetch Failed", message: error.message || "Unable to fetch metadata." });
     } finally {
+      setFetchingInfo(false);
+    }
+  };
+
+  const handleRetryFetchWithCookies = async () => {
+    if (!hasElectron || !cookiePrompt.open || !cookiePrompt.url) return;
+    setCookieRetrying(true);
+    setFetchingInfo(true);
+    setErrorMessage("");
+    setVideoInfo(null);
+
+    try {
+      const response = await window.electronAPI.fetchVideoInfo({
+        url: cookiePrompt.url,
+        cookieBrowser
+      });
+      if (!response?.ok && response?.reason === "browser_cookies_failed") {
+        setCookiePrompt((prev) => ({
+          ...prev,
+          message: response.message || "Could not read browser cookies.",
+          detail: response.detail || "",
+          canUseCookiesFile: true
+        }));
+        pushToast({
+          type: "warn",
+          title: "Browser Cookie Access Failed",
+          message: "Close the browser fully and retry, or pick an exported cookies.txt file."
+        });
+        return;
+      }
+      if (!response?.ok || !response?.data) {
+        throw new Error(response?.message || "Unable to fetch metadata.");
+      }
+      const info = response.data;
+      setVideoInfo(info);
+      setSelectedFormatId("auto");
+      setActiveCookieBrowser(cookieBrowser);
+      setActiveCookiesFile("");
+      setCookiesFilePath("");
+      setCookiePrompt((prev) => ({ ...prev, open: false }));
+      if (!Array.isArray(info.formats) || info.formats.length === 0) {
+        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
+        pushToast({
+          type: "warn",
+          title: "No Formats Found",
+          message: "This video may be DRM-protected or currently unavailable for direct download."
+        });
+      }
+      pushToast({
+        type: "success",
+        title: "Metadata Loaded",
+        message: `Using ${getBrowserLabel(cookieBrowser)} cookies.`
+      });
+    } catch (error) {
+      setErrorMessage(error.message || "Unable to fetch metadata with cookies.");
+      pushToast({
+        type: "error",
+        title: "Cookie Retry Failed",
+        message: error.message || "Unable to fetch metadata with cookies."
+      });
+    } finally {
+      setCookieRetrying(false);
+      setFetchingInfo(false);
+    }
+  };
+
+  const handleChooseCookiesFile = async () => {
+    if (!hasElectron || !window.electronAPI?.chooseCookiesFile) return;
+    const selected = await window.electronAPI.chooseCookiesFile();
+    if (selected) {
+      setCookiesFilePath(selected);
+    }
+  };
+
+  const handleRetryFetchWithCookiesFile = async () => {
+    if (!hasElectron || !cookiePrompt.open || !cookiePrompt.url) return;
+    if (!cookiesFilePath) {
+      setErrorMessage("Select a cookies.txt file first.");
+      return;
+    }
+
+    setCookieFileRetrying(true);
+    setFetchingInfo(true);
+    setErrorMessage("");
+    setVideoInfo(null);
+
+    try {
+      const response = await window.electronAPI.fetchVideoInfo({
+        url: cookiePrompt.url,
+        cookiesFile: cookiesFilePath
+      });
+      if (!response?.ok || !response?.data) {
+        throw new Error(response?.message || "Unable to fetch metadata with cookies file.");
+      }
+      const info = response.data;
+      setVideoInfo(info);
+      setSelectedFormatId("auto");
+      setActiveCookiesFile(cookiesFilePath);
+      setActiveCookieBrowser("");
+      setCookiePrompt((prev) => ({ ...prev, open: false }));
+      if (!Array.isArray(info.formats) || info.formats.length === 0) {
+        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
+        pushToast({
+          type: "warn",
+          title: "No Formats Found",
+          message: "This video may be DRM-protected or currently unavailable for direct download."
+        });
+      }
+      pushToast({
+        type: "success",
+        title: "Metadata Loaded",
+        message: `Using ${getFileName(cookiesFilePath)}.`
+      });
+    } catch (error) {
+      setErrorMessage(error.message || "Unable to fetch metadata with cookies file.");
+      pushToast({
+        type: "error",
+        title: "Cookies File Retry Failed",
+        message: error.message || "Unable to fetch metadata with cookies file."
+      });
+    } finally {
+      setCookieFileRetrying(false);
       setFetchingInfo(false);
     }
   };
@@ -226,6 +423,8 @@ function App() {
         mode,
         quality,
         selectedFormatId,
+        cookieBrowser: activeCookieBrowser,
+        cookiesFile: activeCookiesFile,
         allowPlaylist: Boolean(videoInfo?.isPlaylist),
         playlistCount: videoInfo?.playlistCount || 0
       });
@@ -311,6 +510,22 @@ function App() {
       return;
     }
     window.open(PROJECT_REPO_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const handleOpenCookieGuide = async () => {
+    if (hasElectron && window.electronAPI?.openExternal) {
+      await window.electronAPI.openExternal(YTDLP_COOKIE_EXPORT_GUIDE_URL);
+      return;
+    }
+    window.open(YTDLP_COOKIE_EXPORT_GUIDE_URL, "_blank", "noopener,noreferrer");
+  };
+
+  const handleOpenCookieExtension = async () => {
+    if (hasElectron && window.electronAPI?.openExternal) {
+      await window.electronAPI.openExternal(RECOMMENDED_COOKIE_EXTENSION_URL);
+      return;
+    }
+    window.open(RECOMMENDED_COOKIE_EXTENSION_URL, "_blank", "noopener,noreferrer");
   };
 
   return (
@@ -542,6 +757,115 @@ function App() {
           </section>
         </main>
       </div>
+
+      {cookiePrompt.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
+          <Card className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden p-5">
+            <h3 className="font-display text-base font-semibold text-app-text">Authentication Required</h3>
+            <div className="mt-2 overflow-y-auto pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
+              <p className="text-sm text-app-muted">
+                {cookiePrompt.message ||
+                  "This video needs a signed-in browser session. Choose a browser and retry metadata fetch."}
+              </p>
+              {cookiePrompt.detail && (
+                <pre className="mt-3 max-h-24 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 text-xs text-app-muted [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
+                  {cookiePrompt.detail}
+                </pre>
+              )}
+              <div className="mt-4">
+                <Input
+                  as="select"
+                  label="Browser Cookies"
+                  value={cookieBrowser}
+                  onChange={(event) => setCookieBrowser(event.target.value)}
+                >
+                  {COOKIE_BROWSER_OPTIONS.filter((item) => cookiePrompt.supportedBrowsers.includes(item.value)).map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </Input>
+              </div>
+              {cookiePrompt.canUseCookiesFile && (
+                <div className="mt-4 rounded-2xl border border-app-border bg-app-panel p-3">
+                  <p className="text-xs text-app-muted">
+                    Browser cookie access failed. Export `cookies.txt` and retry with file import.
+                  </p>
+                  <details className="mt-3 rounded-2xl border border-app-border bg-app-card p-3">
+                    <summary className="cursor-pointer text-sm font-medium text-app-text">
+                      How to export `cookies.txt` (step by step)
+                    </summary>
+                    <ol className="mt-3 list-decimal space-y-2 pl-5 text-xs text-app-muted">
+                      <li>Open your browser and log in to YouTube.</li>
+                      <li>Install this extension (recommended): `Get cookies.txt LOCALLY`.</li>
+                      <li>Click `Open Recommended Extension`, then click `Add to Chrome`/`Add to Brave`.</li>
+                      <li>Open `youtube.com`, click the extension icon, then export cookies for YouTube.</li>
+                      <li>Save as `cookies.txt` (Netscape format).</li>
+                      <li>The file is usually in `Downloads` (example: `C:\\Users\\YourName\\Downloads`).</li>
+                      <li>In this popup, click the folder icon, select the file, then click `Retry With Cookies File`.</li>
+                    </ol>
+                    <div className="mt-3 flex flex-col gap-2">
+                      <Button className="w-full" variant="ghost" onClick={handleOpenCookieExtension}>
+                        Open Recommended Extension
+                      </Button>
+                      <Button className="w-full" variant="ghost" onClick={handleOpenCookieGuide}>
+                        Open Official Cookie Guide
+                      </Button>
+                    </div>
+                  </details>
+                  <div className="mt-3 flex items-end gap-2">
+                    <Input
+                      className="flex-1"
+                      label="Cookies File"
+                      value={cookiesFilePath}
+                      readOnly
+                      placeholder="Select cookies.txt..."
+                    />
+                    <Button
+                      variant="secondary"
+                      className="h-12 w-12 rounded-2xl p-0"
+                      onClick={handleChooseCookiesFile}
+                      aria-label="Select cookies file"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9">
+                        <path d="M3.75 6.75h5l2 2h9.5v8.5a2 2 0 0 1-2 2h-12.5a2 2 0 0 1-2-2v-10.5z" />
+                      </svg>
+                    </Button>
+                  </div>
+                  <Button
+                    className="mt-3 w-full"
+                    variant="secondary"
+                    onClick={handleRetryFetchWithCookiesFile}
+                    disabled={!cookiesFilePath || cookieFileRetrying || cookieRetrying}
+                  >
+                    {cookieFileRetrying ? "Retrying With File..." : "Retry With Cookies File"}
+                  </Button>
+                </div>
+              )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setCookiePrompt((prev) => ({ ...prev, open: false }));
+                  setActiveCookieBrowser("");
+                  setActiveCookiesFile("");
+                  setCookiesFilePath("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleRetryFetchWithCookies}
+                disabled={cookieRetrying || cookieFileRetrying}
+              >
+                {cookieRetrying ? "Retrying..." : "Retry With Cookies"}
+              </Button>
+            </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       <ToastStack
         toasts={toasts}

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StreamFetch | Fast Desktop Video Downloader for Windows</title>
+    <meta
+      name="description"
+      content="StreamFetch is a fast Windows desktop video downloader with queue controls, smart retries, format selection, and built-in yt-dlp updates."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="StreamFetch home">
+        <span class="brand-mark">SF</span>
+        <span class="brand-text">StreamFetch</span>
+      </a>
+      <nav class="top-nav" aria-label="Main navigation">
+        <a href="#features">Features</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#screenshots">Screenshots</a>
+        <a href="#security">Security</a>
+      </nav>
+      <a class="btn btn-ghost" href="https://github.com/Shripad735/streamfetch" target="_blank" rel="noreferrer">
+        GitHub
+      </a>
+    </header>
+
+    <main>
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow">Windows Desktop App</p>
+          <h1>Fetch, queue, and download videos faster with desktop-level control.</h1>
+          <p class="hero-text">
+            StreamFetch combines Electron, React, and yt-dlp into a focused Windows app for reliable video and audio
+            downloads, even when links need retries or cookie-authenticated access.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/Shripad735/streamfetch/releases/latest" target="_blank" rel="noreferrer">
+              Download Latest Release
+            </a>
+            <a class="btn btn-secondary" href="https://github.com/Shripad735/streamfetch" target="_blank" rel="noreferrer">
+              View Source
+            </a>
+          </div>
+          <ul class="hero-points">
+            <li>Queue-based workflow with per-item progress</li>
+            <li>Pause, resume, cancel, and retry controls</li>
+            <li>Smart fallback for format and auth issues</li>
+          </ul>
+        </div>
+        <aside class="hero-panel" aria-label="Product highlights">
+          <h2>Why StreamFetch</h2>
+          <div class="metric">
+            <span class="metric-title">Formats</span>
+            <span class="metric-value">Video MP4 + Audio MP3 + advanced format IDs</span>
+          </div>
+          <div class="metric">
+            <span class="metric-title">Reliability</span>
+            <span class="metric-value">Cookie retry flow and no-format diagnostics</span>
+          </div>
+          <div class="metric">
+            <span class="metric-title">Maintenance</span>
+            <span class="metric-value">Built-in yt-dlp version check and one-click update</span>
+          </div>
+          <div class="metric">
+            <span class="metric-title">Distribution</span>
+            <span class="metric-value">Windows installer and portable builds via GitHub Releases</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section" id="features">
+        <div class="section-head">
+          <p class="eyebrow">Feature Highlights</p>
+          <h2>Built for high-throughput downloads, not one-off scripts</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card" style="--order: 1;">
+            <h3>Queue Engine</h3>
+            <p>Manage multiple jobs with clear states, progress bars, ETA, and scoped job logs.</p>
+          </article>
+          <article class="feature-card" style="--order: 2;">
+            <h3>Playlist Controls</h3>
+            <p>Target full playlists or narrow ranges with include and exclude style controls.</p>
+          </article>
+          <article class="feature-card" style="--order: 3;">
+            <h3>Advanced Format Picker</h3>
+            <p>Pick exact format IDs when auto mode is not enough for your target output.</p>
+          </article>
+          <article class="feature-card" style="--order: 4;">
+            <h3>Auth Recovery Flow</h3>
+            <p>Fallback from browser cookies to `cookies.txt` import when extraction is blocked.</p>
+          </article>
+          <article class="feature-card" style="--order: 5;">
+            <h3>Speed Limits</h3>
+            <p>Apply global and per-download bandwidth caps with human-readable limits.</p>
+          </article>
+          <article class="feature-card" style="--order: 6;">
+            <h3>Update Awareness</h3>
+            <p>Detect both app and yt-dlp updates so your downloader stays current.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="workflow">
+        <div class="section-head">
+          <p class="eyebrow">Typical Workflow</p>
+          <h2>From URL to completed file in a few predictable steps</h2>
+        </div>
+        <ol class="step-grid">
+          <li>
+            <span class="step-num">01</span>
+            <h3>Paste URL + Fetch</h3>
+            <p>Load metadata and available streams directly from yt-dlp extraction.</p>
+          </li>
+          <li>
+            <span class="step-num">02</span>
+            <h3>Select Output</h3>
+            <p>Choose video or audio mode, quality profile, folder, and optional format ID.</p>
+          </li>
+          <li>
+            <span class="step-num">03</span>
+            <h3>Queue + Monitor</h3>
+            <p>Add items to queue and track progress with status, speed, ETA, and logs.</p>
+          </li>
+          <li>
+            <span class="step-num">04</span>
+            <h3>Recover if Needed</h3>
+            <p>Retry with browser cookies or exported `cookies.txt` when authentication is required.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="screenshots">
+        <div class="section-head">
+          <p class="eyebrow">App Screens</p>
+          <h2>Compact interface with direct control over every download step</h2>
+        </div>
+        <div class="shot-grid">
+          <figure class="shot-card">
+            <img src="./assets/screenshots/streamfetch-main-ui.png" alt="Main StreamFetch interface with fetch and options panel" />
+            <figcaption>Metadata fetch, format selection, and queue creation</figcaption>
+          </figure>
+          <figure class="shot-card">
+            <img src="./assets/screenshots/streamfetch-queue-view.png" alt="StreamFetch queue and history view with progress cards" />
+            <figcaption>Per-item queue tracking, history, and runtime logs</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section security" id="security">
+        <div class="section-head">
+          <p class="eyebrow">Security Model</p>
+          <h2>Desktop convenience without dropping core Electron safeguards</h2>
+        </div>
+        <div class="security-grid">
+          <p><strong>Node integration off:</strong> renderer cannot directly call Node APIs.</p>
+          <p><strong>Context isolation on:</strong> UI code is isolated from the preload bridge.</p>
+          <p><strong>Whitelisted IPC:</strong> only approved channels are exposed to renderer.</p>
+          <p><strong>Validated process args:</strong> download commands use controlled spawn arguments.</p>
+        </div>
+      </section>
+
+      <section class="section cta">
+        <h2>Start using StreamFetch on Windows</h2>
+        <p>Grab the latest installer or portable build, then queue your first download in under a minute.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/Shripad735/streamfetch/releases/latest" target="_blank" rel="noreferrer">
+            Get Latest Build
+          </a>
+          <a class="btn btn-secondary" href="https://github.com/Shripad735/streamfetch" target="_blank" rel="noreferrer">
+            Explore Repository
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p><span id="year"></span> StreamFetch. Built with Electron, React, and yt-dlp.</p>
+    </footer>
+
+    <script>
+      document.getElementById("year").textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

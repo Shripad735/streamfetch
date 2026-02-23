@@ -67,6 +67,33 @@ npm run build:renderer
 npm start
 ```
 
+## Build Prerequisite
+Make sure yt-dlp is already installed in your system. 
+
+In Linux or MacOS, make sure the binary exists in $PATH.
+
+Linux:
+Download binary through this link or build from source. 
+Download link: <https://github.com/yt-dlp/yt-dlp/releases/download/2026.02.21/yt-dlp_linux>
+
+MacOS: 
+
+```bash 
+brew install yt-dlp 
+```
+```
+```
+
+
+
+## Build (MacOS or Linux)
+
+```bash
+npm run build 
+```
+```
+```
+
 ## Build Windows Installer + Portable
 
 ```bash

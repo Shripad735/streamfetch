@@ -113,21 +113,14 @@ function isUsableFfmpegBinary(candidatePath) {
 
 // Cross Platform ensureManagedYtDlpPath()
 
-function linuxManagedYtDlpPath() {
-  const candidates = [
-    "/usr/local/bin/yt-dlp",
-    path.join(require("os").homedir(), ".local/bin/yt-dlp"),
-  ];
+function unixManagedYtDlpPath() {
+  const result = spawnSync("which", ["yt-dlp"]);
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
+  if (result.status === 0 && result.stdout) {
+    return result.stdout.toString().trim();
   }
 
-  throw new Error(
-    "yt-dlp not found. Install yt-dlp in /usr/local/bin or ~/.local/bin"
-  );
+  throw new Error("yt-dlp not found in PATH");
 }
 
 function winManagedYtDplPath() {
@@ -155,12 +148,13 @@ function ensureManagedYtDlpPath() {
     return winManagedYtDplPath();
   }
 
-  if (process.platform === "linux") {
-    return linuxManagedYtDlpPath();
+  if (process.platform === "linux" || process.platform === "darwin") {
+    return unixManagedYtDlpPath();
   }
 
   throw new Error(`Unsupported platform: ${process.platform}`);
 }
+
 function getFfmpegPath() {
   const managed = path.join(app.getPath("userData"), "bin", "ffmpeg.exe");
   if (isUsableFfmpegBinary(managed)) {

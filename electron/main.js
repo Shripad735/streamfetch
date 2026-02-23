@@ -111,23 +111,56 @@ function isUsableFfmpegBinary(candidatePath) {
   }
 }
 
-function ensureManagedYtDlpPath() {
+// Cross Platform ensureManagedYtDlpPath()
+
+function linuxManagedYtDlpPath() {
+  const candidates = [
+    "/usr/local/bin/yt-dlp",
+    path.join(require("os").homedir(), ".local/bin/yt-dlp"),
+  ];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  }
+
+  throw new Error(
+    "yt-dlp not found. Install yt-dlp in /usr/local/bin or ~/.local/bin"
+  );
+}
+
+function winManagedYtDplPath() {
   const managedDir = path.join(app.getPath("userData"), "bin");
   const managedPath = path.join(managedDir, "yt-dlp.exe");
+
   if (fs.existsSync(managedPath)) {
     return managedPath;
   }
 
   const bundledPath = getBundledBinaryPath("yt-dlp.exe");
+
   if (!fs.existsSync(bundledPath)) {
     throw new Error("yt-dlp.exe was not found in the bin folder.");
   }
 
   fs.mkdirSync(managedDir, { recursive: true });
   fs.copyFileSync(bundledPath, managedPath);
+
   return managedPath;
 }
 
+function ensureManagedYtDlpPath() {
+  if (process.platform === "win32") {
+    return winManagedYtDplPath();
+  }
+
+  if (process.platform === "linux") {
+    return linuxManagedYtDlpPath();
+  }
+
+  throw new Error(`Unsupported platform: ${process.platform}`);
+}
 function getFfmpegPath() {
   const managed = path.join(app.getPath("userData"), "bin", "ffmpeg.exe");
   if (isUsableFfmpegBinary(managed)) {

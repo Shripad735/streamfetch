@@ -111,7 +111,15 @@ function isUsableFfmpegBinary(candidatePath) {
   }
 }
 
-function ensureManagedYtDlpPath() {
+function unixManagedYtDlpPath() {
+  const result = spawnSync("which", ["yt-dlp"]);
+  if (result.status === 0 && result.stdout) {
+    return result.stdout.toString().trim();
+  }
+  throw new Error("yt-dlp not found in PATH");
+}
+
+function winManagedYtDlpPath() {
   const managedDir = path.join(app.getPath("userData"), "bin");
   const managedPath = path.join(managedDir, "yt-dlp.exe");
   if (fs.existsSync(managedPath)) {
@@ -126,6 +134,16 @@ function ensureManagedYtDlpPath() {
   fs.mkdirSync(managedDir, { recursive: true });
   fs.copyFileSync(bundledPath, managedPath);
   return managedPath;
+}
+
+function ensureManagedYtDlpPath() {
+  if (process.platform === "win32") {
+    return winManagedYtDlpPath();
+  }
+  if (process.platform === "linux" || process.platform === "darwin") {
+    return unixManagedYtDlpPath();
+  }
+  throw new Error(`Unsupported platform: ${process.platform}`);
 }
 
 function getFfmpegPath() {

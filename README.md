@@ -73,7 +73,12 @@ On Linux or macOS, make sure `yt-dlp` is already installed and available in your
 
 **Linux:**
 
-Download the binary from [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases) or build from source.
+Download the binary from [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases), make it executable, and place it in your `PATH`:
+
+```bash
+chmod +x yt-dlp
+sudo mv yt-dlp /usr/local/bin/
+```
 
 **macOS:**
 

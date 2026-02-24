@@ -116,7 +116,7 @@ function unixManagedYtDlpPath() {
   if (result.status === 0 && result.stdout) {
     return result.stdout.toString().trim();
   }
-  throw new Error("yt-dlp not found in PATH");
+  throw new Error("yt-dlp not found in PATH. Please install yt-dlp and ensure it is accessible in your system PATH. See README for installation instructions.");
 }
 
 function winManagedYtDlpPath() {

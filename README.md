@@ -99,7 +99,7 @@ Artifacts are created in `release/` using these patterns:
 
 ## Release Workflow
 
-- GitHub workflow runs on `v*` tags (for example `v1.0.10`).
+- GitHub workflow runs on `v*` tags (for example `v1.2.0`).
 - Release notes are auto-generated from commits between the previous release tag and the current tag.
 - Notes are grouped into `Features`, `Fixes`, and `Other Changes` based on commit message prefix.
 

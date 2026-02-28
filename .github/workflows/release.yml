@@ -3,8 +3,14 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
+    inputs:
+      build_macos:
+        description: "Also build macOS artifact"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-${{ github.ref }}
@@ -13,8 +19,11 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  YTDLP_VERSION: "2025.01.15"
+
 jobs:
-  build-and-release:
+  build-windows:
     runs-on: windows-latest
 
     steps:
@@ -53,21 +62,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Install FFmpeg
-        run: choco install ffmpeg -y --no-progress
-
-      - name: Bundle ffmpeg.exe
+      - name: Bundle Windows binaries
         shell: pwsh
         run: |
+          choco install ffmpeg -y --no-progress
           New-Item -ItemType Directory -Force -Path bin | Out-Null
+
           $ffmpegCandidates = Get-ChildItem -Path "$env:ChocolateyInstall\lib" -Filter "ffmpeg.exe" -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match "\\tools\\.*\\bin\\ffmpeg\.exe$" }
-
           if (-not $ffmpegCandidates) {
             Write-Error "Could not find FFmpeg binary in Chocolatey package files."
             exit 1
@@ -75,79 +82,286 @@ jobs:
 
           $ffmpegFile = $ffmpegCandidates | Sort-Object Length -Descending | Select-Object -First 1
           if ($ffmpegFile.Length -lt 50MB) {
-            Write-Error "Resolved FFmpeg binary is too small ($($ffmpegFile.Length) bytes). This usually means a shim was selected."
+            Write-Error "Resolved FFmpeg binary is too small ($($ffmpegFile.Length) bytes)."
             exit 1
           }
-
           Copy-Item $ffmpegFile.FullName "bin/ffmpeg.exe" -Force
-          $bundled = Get-Item "bin/ffmpeg.exe"
-          Write-Host "Bundled FFmpeg: $($bundled.FullName) ($([Math]::Round($bundled.Length / 1MB, 2)) MB)"
+          Write-Host "Bundled FFmpeg: $([Math]::Round((Get-Item 'bin/ffmpeg.exe').Length / 1MB, 2)) MB"
 
-      - name: Download yt-dlp
-        shell: pwsh
-        env:
-          YTDLP_VERSION: '2025.01.15'
-        run: |
-          New-Item -ItemType Directory -Force -Path bin | Out-Null
           $baseUrl = "https://github.com/yt-dlp/yt-dlp/releases/download/$env:YTDLP_VERSION"
           Invoke-WebRequest -Uri "$baseUrl/yt-dlp.exe" -OutFile "bin/yt-dlp.exe"
           Invoke-WebRequest -Uri "$baseUrl/SHA2-256SUMS" -OutFile "bin/SHA2-256SUMS"
 
           $checksumLine = Select-String -Path "bin/SHA2-256SUMS" -Pattern '^([a-fA-F0-9]{64})\s+\*?yt-dlp\.exe$' | Select-Object -First 1
           if (-not $checksumLine) {
-            Write-Error "Could not find checksum for yt-dlp.exe in SHA2-256SUMS"
+            Write-Error "Could not find checksum for yt-dlp.exe in SHA2-256SUMS."
             exit 1
           }
-
           $expectedHash = $checksumLine.Matches[0].Groups[1].Value.ToUpper()
           $actualHash = (Get-FileHash -Algorithm SHA256 "bin/yt-dlp.exe").Hash
           if ($actualHash -ne $expectedHash) {
-            Write-Error "SHA-256 mismatch for yt-dlp.exe: expected $expectedHash, got $actualHash"
+            Write-Error "SHA-256 mismatch for yt-dlp.exe: expected $expectedHash, got $actualHash."
             exit 1
           }
 
-      - name: Build Windows installer and portable
+      - name: Build Windows setup
         run: npm run build:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify generated executables
+      - name: Verify Windows setup artifact
         shell: pwsh
         run: |
-          $exeFiles = Get-ChildItem -Path "release" -Filter "*.exe" -File -Recurse
-          if (-not $exeFiles) {
-            Write-Error "No .exe files found in release/"
+          $setupFiles = Get-ChildItem -Path "release" -Filter "StreamFetch-Setup-*.exe" -File
+          if (-not $setupFiles) {
+            Write-Error "No Windows setup executable found in release/."
             exit 1
           }
-          $exeFiles | Select-Object FullName, Length
 
           $packagedFfmpeg = Get-ChildItem -Path "release" -Filter "ffmpeg.exe" -File -Recurse |
             Where-Object { $_.FullName -match "\\resources\\bin\\ffmpeg\.exe$" } |
             Select-Object -First 1
           if (-not $packagedFfmpeg) {
-            Write-Error "Packaged FFmpeg was not found under release/**/resources/bin/ffmpeg.exe"
+            Write-Error "Packaged FFmpeg was not found under release/**/resources/bin/ffmpeg.exe."
             exit 1
           }
           if ($packagedFfmpeg.Length -lt 50MB) {
             Write-Error "Packaged FFmpeg is too small ($($packagedFfmpeg.Length) bytes)."
             exit 1
           }
-          Write-Host "Packaged FFmpeg size: $([Math]::Round($packagedFfmpeg.Length / 1MB, 2)) MB"
+
+      - name: Upload Windows setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release/StreamFetch-Setup-*.exe
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [ -z "${tag}" ]; then
+            echo "GITHUB_REF_NAME is empty for tag build." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+
+          if [ -z "${pkg_version}" ]; then
+            echo "package.json version is missing." >&2
+            exit 1
+          fi
+
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "Tag version '${tag_version}' does not match package.json version '${pkg_version}'." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle Linux binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+
+          base_url="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}"
+          curl -fL "${base_url}/yt-dlp_linux" -o "bin/yt-dlp"
+          curl -fL "${base_url}/SHA2-256SUMS" -o "bin/SHA2-256SUMS"
+          expected_hash="$(grep -E '^[a-fA-F0-9]{64}[[:space:]]+\*?yt-dlp_linux$' bin/SHA2-256SUMS | head -n1 | awk '{print toupper($1)}')"
+          if [ -z "${expected_hash}" ]; then
+            echo "Could not find checksum for yt-dlp_linux in SHA2-256SUMS" >&2
+            exit 1
+          fi
+          actual_hash="$(sha256sum bin/yt-dlp | awk '{print toupper($1)}')"
+          if [ "${actual_hash}" != "${expected_hash}" ]; then
+            echo "SHA-256 mismatch for yt-dlp Linux binary." >&2
+            exit 1
+          fi
+          chmod +x bin/yt-dlp
+
+          curl -fL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" -o /tmp/ffmpeg-static.tar.xz
+          tar -xf /tmp/ffmpeg-static.tar.xz -C /tmp
+          ffmpeg_dir="$(find /tmp -maxdepth 1 -type d -name 'ffmpeg-*-amd64-static' | head -n1)"
+          if [ -z "${ffmpeg_dir}" ] || [ ! -f "${ffmpeg_dir}/ffmpeg" ]; then
+            echo "Failed to extract static ffmpeg binary." >&2
+            exit 1
+          fi
+          cp "${ffmpeg_dir}/ffmpeg" "bin/ffmpeg"
+          chmod +x bin/ffmpeg
+          ./bin/ffmpeg -version | head -n1
+
+      - name: Build Linux AppImage
+        run: npm run build:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Linux AppImage artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          compgen -G "release/*.AppImage" > /dev/null || {
+            echo "No Linux AppImage found in release/." >&2
+            exit 1
+          }
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release/*.AppImage
+          if-no-files-found: error
+
+  build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_macos == true }}
+    continue-on-error: true
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [ -z "${tag}" ]; then
+            echo "GITHUB_REF_NAME is empty for tag build." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+
+          if [ -z "${pkg_version}" ]; then
+            echo "package.json version is missing." >&2
+            exit 1
+          fi
+
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "Tag version '${tag_version}' does not match package.json version '${pkg_version}'." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle macOS binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bin
+
+          base_url="https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}"
+          curl -fL "${base_url}/yt-dlp_macos" -o "bin/yt-dlp"
+          curl -fL "${base_url}/SHA2-256SUMS" -o "bin/SHA2-256SUMS"
+          expected_hash="$(grep -E '^[a-fA-F0-9]{64}[[:space:]]+\*?yt-dlp_macos$' bin/SHA2-256SUMS | head -n1 | awk '{print toupper($1)}')"
+          if [ -z "${expected_hash}" ]; then
+            echo "Could not find checksum for yt-dlp_macos in SHA2-256SUMS" >&2
+            exit 1
+          fi
+          actual_hash="$(shasum -a 256 bin/yt-dlp | awk '{print toupper($1)}')"
+          if [ "${actual_hash}" != "${expected_hash}" ]; then
+            echo "SHA-256 mismatch for yt-dlp macOS binary." >&2
+            exit 1
+          fi
+          chmod +x bin/yt-dlp
+
+          curl -fL "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" -o /tmp/ffmpeg.zip
+          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg-bin
+          if [ ! -f /tmp/ffmpeg-bin/ffmpeg ]; then
+            echo "Failed to extract macOS ffmpeg binary." >&2
+            exit 1
+          fi
+          cp /tmp/ffmpeg-bin/ffmpeg bin/ffmpeg
+          chmod +x bin/ffmpeg
+          ./bin/ffmpeg -version | head -n1
+
+      - name: Build macOS DMG
+        run: npm run build:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify macOS DMG artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          compgen -G "release/*.dmg" > /dev/null || {
+            echo "No macOS DMG found in release/." >&2
+            exit 1
+          }
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release/*.dmg
+          if-no-files-found: error
+
+  release:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && always() && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' }}
+    needs:
+      - build-windows
+      - build-linux
+      - build-macos
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
 
       - name: Generate release notes from commits
         shell: pwsh
         run: |
           git fetch --tags --force
 
-          $isTagRelease = $env:GITHUB_REF_TYPE -eq "tag"
-          $currentTag = if ($isTagRelease) { $env:GITHUB_REF_NAME } else { "" }
-          $currentRef = if ($isTagRelease) { $currentTag } else { $env:GITHUB_SHA }
-          $displayVersion = if ($isTagRelease) { $currentTag } else { "manual-$($env:GITHUB_SHA.Substring(0,7))" }
+          $currentTag = $env:GITHUB_REF_NAME
+          $currentRef = $currentTag
+          $displayVersion = $currentTag
 
           $previousTag = ""
           $mergedTags = git tag --merged HEAD --sort=-creatordate
           foreach ($tag in $mergedTags) {
-            if ($currentTag -and $tag -eq $currentTag) { continue }
+            if ($tag -eq $currentTag) { continue }
             $previousTag = $tag
             break
           }
@@ -155,7 +369,7 @@ jobs:
           if (-not $previousTag) {
             $allTags = git tag --sort=-creatordate
             foreach ($tag in $allTags) {
-              if ($currentTag -and $tag -eq $currentTag) { continue }
+              if ($tag -eq $currentTag) { continue }
               $previousTag = $tag
               break
             }
@@ -234,8 +448,6 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/StreamFetch-Setup-*.exe
-            release/StreamFetch-Portable-*.exe
+          files: release-assets/*
           fail_on_unmatched_files: true
           body_path: release-notes.md

@@ -111,25 +111,37 @@ function isUsableFfmpegBinary(candidatePath) {
   }
 }
 
+function isUsableCommandBinary(candidatePath, versionArgs = ["--version"]) {
+  if (!candidatePath || !fs.existsSync(candidatePath)) {
+    return false;
+  }
+
+  try {
+    const probe = spawnSync(candidatePath, versionArgs, {
+      windowsHide: true,
+      timeout: 10000
+    });
+    return probe.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 // Cross Platform ensureManagedYtDlpPath()
 
 function unixManagedYtDlpPath() {
+  const bundledPath = getBundledBinaryPath("yt-dlp");
+  if (isUsableCommandBinary(bundledPath)) {
+    return bundledPath;
+  }
+
   const result = spawnSync("which", ["yt-dlp"]);
 
   if (result.status === 0 && result.stdout) {
     const ytDlpPath = result.stdout.toString().trim();
 
-    try {
-      const probe = spawnSync(ytDlpPath, ["--version"], {
-        windowsHide: true,
-        timeout: 10000
-      });
-
-      if (probe.status === 0) {
-        return ytDlpPath;
-      }
-    } catch {
-      // fall through to error
+    if (isUsableCommandBinary(ytDlpPath)) {
+      return ytDlpPath;
     }
 
     throw new Error(
@@ -146,13 +158,13 @@ function winManagedYtDlpPath() {
   const managedDir = path.join(app.getPath("userData"), "bin");
   const managedPath = path.join(managedDir, "yt-dlp.exe");
 
-  if (fs.existsSync(managedPath)) {
+  if (isUsableCommandBinary(managedPath)) {
     return managedPath;
   }
 
   const bundledPath = getBundledBinaryPath("yt-dlp.exe");
 
-  if (!fs.existsSync(bundledPath)) {
+  if (!isUsableCommandBinary(bundledPath)) {
     throw new Error("yt-dlp.exe was not found in the bin folder.");
   }
 

@@ -1,6 +1,6 @@
 # StreamFetch
 
-Cross-platform desktop downloader for YouTube and other platforms, optimized primarily for Windows. Built with Electron + React and powered by `yt-dlp`. Pre-built installers are provided for Windows; macOS and Linux users can build from source.
+Cross-platform desktop downloader for YouTube and other platforms, built with Electron + React and powered by `yt-dlp`. Pre-built release artifacts are published for Windows, macOS, and Linux.
 
 ## Screenshots
 
@@ -49,7 +49,7 @@ StreamFetch now handles restricted content in a guided flow:
 streamfetch/
   electron/        # Main process + preload bridge
   src/             # React renderer
-  bin/             # yt-dlp.exe and optional ffmpeg.exe
+  bin/             # Platform binaries bundled into release builds
   release/         # Build outputs
 ```
 
@@ -67,24 +67,11 @@ npm run build:renderer
 npm start
 ```
 
-## Build and Runtime Prerequisite (macOS and Linux)
+## Build for macOS or Linux (Source)
 
-There are no pre-built installers for macOS or Linux. To run StreamFetch on these platforms you must build from source yourself. Before building, install both `yt-dlp` and `ffmpeg` so they are available in your system `$PATH`:
+Release builds bundle `yt-dlp` and `ffmpeg` automatically in CI.
 
-**Linux:**
-```bash
-# yt-dlp – download the binary from the official releases
-# https://github.com/yt-dlp/yt-dlp/releases
-# ffmpeg – install via your package manager
-sudo apt install ffmpeg        # Debian/Ubuntu
-```
-
-**macOS:**
-```bash
-brew install yt-dlp ffmpeg
-```
-
-Then clone the repository and build:
+For local source builds, provide binaries in `bin/` for your platform (`yt-dlp` and optional `ffmpeg`) or install them in your system `$PATH`, then clone and build:
 
 ```bash
 git clone https://github.com/Shripad735/streamfetch.git
@@ -93,21 +80,33 @@ npm install
 npm run build
 ```
 
-## Build Windows Installer + Portable
+## Build Windows Setup (Local)
 
-Pre-built Windows installers and portable executables are published with every release. To build them locally:
+Pre-built Windows setup executables are published with every release. To build locally:
 
 ```bash
 npm run build:win
 ```
 
-Artifacts are created in `release/` using these patterns:
+Artifact is created in `release/`:
 - `StreamFetch-Setup-<version>.exe` (installer)
-- `StreamFetch-Portable-<version>.exe` (portable)
+
+## Build macOS DMG (Local)
+
+```bash
+npm run build:mac
+```
+
+## Build Linux AppImage (Local)
+
+```bash
+npm run build:linux
+```
 
 ## Release Workflow
 
 - GitHub workflow runs on `v*` tags (for example `v1.2.0`).
+- Tagged releases build artifacts for Windows, macOS, and Linux.
 - Release notes are auto-generated from commits between the previous release tag and the current tag.
 - Notes are grouped into `Features`, `Fixes`, and `Other Changes` based on commit message prefix.
 
@@ -126,19 +125,18 @@ Use these commit prefixes to classify notes:
 
 ## Required Local Binaries
 
-For source-based development, place these files in `bin/`:
-- `yt-dlp.exe` (required)
-- `ffmpeg.exe` (optional, enables merged best-quality outputs)
+For source-based development, place these files in `bin/` for your target platform:
+- `yt-dlp` or `yt-dlp.exe` (required)
+- `ffmpeg` or `ffmpeg.exe` (optional, enables merged best-quality outputs)
 
 These binaries are not committed to git to keep repository size small.
 
 ## Releases
 
-Install from GitHub Releases for the easiest setup. Each release includes pre-built **Windows-only** artifacts:
+Install from GitHub Releases for the easiest setup. Each tagged release includes:
 - Windows installer (`Setup .exe`)
-- Portable executable (`.exe`)
-
-macOS and Linux users should follow the [Build and Runtime Prerequisite](#build-and-runtime-prerequisite-macos-and-linux) section to build from source.
+- macOS disk image (`.dmg`)
+- Linux AppImage (`.AppImage`)
 
 ## License
 

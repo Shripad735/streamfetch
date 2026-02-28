@@ -23,20 +23,8 @@ env:
   YTDLP_VERSION: "2025.01.15"
 
 jobs:
-  build:
-    if: ${{ matrix.platform != 'macos' || github.event_name != 'workflow_dispatch' || inputs.build_macos == true }}
-    continue-on-error: ${{ matrix.platform == 'macos' }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: windows
-            runner: windows-latest
-          - platform: linux
-            runner: ubuntu-latest
-          - platform: macos
-            runner: macos-latest
+  build-windows:
+    runs-on: windows-latest
 
     steps:
       - name: Checkout repository
@@ -80,7 +68,6 @@ jobs:
         run: npm ci
 
       - name: Bundle Windows binaries
-        if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           choco install ffmpeg -y --no-progress
@@ -117,8 +104,82 @@ jobs:
             exit 1
           }
 
+      - name: Build Windows setup
+        run: npm run build:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Windows setup artifact
+        shell: pwsh
+        run: |
+          $setupFiles = Get-ChildItem -Path "release" -Filter "StreamFetch-Setup-*.exe" -File
+          if (-not $setupFiles) {
+            Write-Error "No Windows setup executable found in release/."
+            exit 1
+          }
+
+          $packagedFfmpeg = Get-ChildItem -Path "release" -Filter "ffmpeg.exe" -File -Recurse |
+            Where-Object { $_.FullName -match "\\resources\\bin\\ffmpeg\.exe$" } |
+            Select-Object -First 1
+          if (-not $packagedFfmpeg) {
+            Write-Error "Packaged FFmpeg was not found under release/**/resources/bin/ffmpeg.exe."
+            exit 1
+          }
+          if ($packagedFfmpeg.Length -lt 50MB) {
+            Write-Error "Packaged FFmpeg is too small ($($packagedFfmpeg.Length) bytes)."
+            exit 1
+          }
+
+      - name: Upload Windows setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release/StreamFetch-Setup-*.exe
+          if-no-files-found: error
+
+  build-linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [ -z "${tag}" ]; then
+            echo "GITHUB_REF_NAME is empty for tag build." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+
+          if [ -z "${pkg_version}" ]; then
+            echo "package.json version is missing." >&2
+            exit 1
+          fi
+
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "Tag version '${tag_version}' does not match package.json version '${pkg_version}'." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Bundle Linux binaries
-        if: matrix.platform == 'linux'
         shell: bash
         run: |
           set -euo pipefail
@@ -150,8 +211,72 @@ jobs:
           chmod +x bin/ffmpeg
           ./bin/ffmpeg -version | head -n1
 
+      - name: Build Linux AppImage
+        run: npm run build:linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify Linux AppImage artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          compgen -G "release/*.AppImage" > /dev/null || {
+            echo "No Linux AppImage found in release/." >&2
+            exit 1
+          }
+
+      - name: Upload Linux AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release/*.AppImage
+          if-no-files-found: error
+
+  build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_macos == true }}
+    continue-on-error: true
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [ -z "${tag}" ]; then
+            echo "GITHUB_REF_NAME is empty for tag build." >&2
+            exit 1
+          fi
+
+          tag_version="${tag#v}"
+          pkg_version="$(node -p "require('./package.json').version")"
+
+          if [ -z "${pkg_version}" ]; then
+            echo "package.json version is missing." >&2
+            exit 1
+          fi
+
+          if [ "${tag_version}" != "${pkg_version}" ]; then
+            echo "Tag version '${tag_version}' does not match package.json version '${pkg_version}'." >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Bundle macOS binaries
-        if: matrix.platform == 'macos'
         shell: bash
         run: |
           set -euo pipefail
@@ -182,58 +307,12 @@ jobs:
           chmod +x bin/ffmpeg
           ./bin/ffmpeg -version | head -n1
 
-      - name: Build Windows setup
-        if: matrix.platform == 'windows'
-        run: npm run build:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Linux AppImage
-        if: matrix.platform == 'linux'
-        run: npm run build:linux
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Build macOS DMG
-        if: matrix.platform == 'macos'
         run: npm run build:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify Windows setup artifact
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        run: |
-          $setupFiles = Get-ChildItem -Path "release" -Filter "StreamFetch-Setup-*.exe" -File
-          if (-not $setupFiles) {
-            Write-Error "No Windows setup executable found in release/."
-            exit 1
-          }
-
-          $packagedFfmpeg = Get-ChildItem -Path "release" -Filter "ffmpeg.exe" -File -Recurse |
-            Where-Object { $_.FullName -match "\\resources\\bin\\ffmpeg\.exe$" } |
-            Select-Object -First 1
-          if (-not $packagedFfmpeg) {
-            Write-Error "Packaged FFmpeg was not found under release/**/resources/bin/ffmpeg.exe."
-            exit 1
-          }
-          if ($packagedFfmpeg.Length -lt 50MB) {
-            Write-Error "Packaged FFmpeg is too small ($($packagedFfmpeg.Length) bytes)."
-            exit 1
-          }
-
-      - name: Verify Linux AppImage artifact
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          compgen -G "release/*.AppImage" > /dev/null || {
-            echo "No Linux AppImage found in release/." >&2
-            exit 1
-          }
-
       - name: Verify macOS DMG artifact
-        if: matrix.platform == 'macos'
         shell: bash
         run: |
           set -euo pipefail
@@ -242,24 +321,7 @@ jobs:
             exit 1
           }
 
-      - name: Upload Windows setup artifact
-        if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          path: release/StreamFetch-Setup-*.exe
-          if-no-files-found: error
-
-      - name: Upload Linux AppImage artifact
-        if: matrix.platform == 'linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-linux
-          path: release/*.AppImage
-          if-no-files-found: error
-
       - name: Upload macOS DMG artifact
-        if: matrix.platform == 'macos'
         uses: actions/upload-artifact@v4
         with:
           name: release-macos
@@ -267,8 +329,11 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && always() && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' }}
+    needs:
+      - build-windows
+      - build-linux
+      - build-macos
     runs-on: ubuntu-latest
 
     steps:

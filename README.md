@@ -4,8 +4,10 @@ Cross-platform desktop downloader for YouTube and other platforms, built with El
 
 ## Screenshots
 
-![StreamFetch Screenshot 1](Screenshots/Pic1%20(1).png)
-![StreamFetch Screenshot 2](Screenshots/Pic1%20(2).png)
+![StreamFetch Main Interface](Images/FullScreenSS.png)
+![StreamFetch Per-Item Progress](Images/PerIteamProgress.png)
+![StreamFetch Clip Range Feature](Images/ClipVideoFeat.png)
+![StreamFetch yt-dlp Updater](Images/ytdlpupdater.png)
 
 ## Highlights
 
@@ -158,3 +160,4 @@ Install from GitHub Releases for the easiest setup. Each tagged release includes
 ## License
 
 MIT
+

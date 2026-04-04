@@ -6,7 +6,7 @@
     <title>StreamFetch | Fast Desktop Video Downloader (Windows / macOS / Linux)</title>
     <meta
       name="description"
-      content="StreamFetch is a fast cross-platform desktop video downloader with queue controls, clip-range downloads, smart retries, format selection, and built-in yt-dlp updates. Release artifacts are available for Windows, macOS, and Linux."
+      content="StreamFetch is a fast cross-platform desktop video downloader with queue controls, Visual Clip Studio, Turbo Mode fragment acceleration, smart retries, format selection, and built-in yt-dlp updates. Release artifacts are available for Windows, macOS, and Linux."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -42,7 +42,8 @@
           <h1>Fetch, queue, and download videos faster with desktop-level control.</h1>
           <p class="hero-text">
             StreamFetch combines Electron, React, and yt-dlp into a focused desktop app for reliable video and audio
-            downloads, including optional clip-range extraction and guided auth recovery when links need retries.
+            downloads, including Visual Clip Studio for precise trimming, manual Turbo Mode acceleration, and guided
+            auth recovery when links need retries.
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="https://github.com/Shripad735/streamfetch/releases/latest" target="_blank" rel="noreferrer">
@@ -54,9 +55,9 @@
           </div>
           <ul class="hero-points">
             <li>Queue-based workflow with per-item progress</li>
-            <li>Clip-range download by start/end time</li>
+            <li>Visual Clip Studio with draggable start/end handles</li>
             <li>Pause, resume, cancel, and retry controls</li>
-            <li>Smart fallback for format and auth issues</li>
+            <li>Turbo Mode with concurrent fragments on compatible streams</li>
           </ul>
         </div>
         <aside class="hero-panel" aria-label="Product highlights">
@@ -64,6 +65,10 @@
           <div class="metric">
             <span class="metric-title">Formats</span>
             <span class="metric-value">Video MP4 + Audio MP3 + advanced format IDs</span>
+          </div>
+          <div class="metric">
+            <span class="metric-title">Precision</span>
+            <span class="metric-value">Visual Clip Studio plus exact start/end time fallback inputs</span>
           </div>
           <div class="metric">
             <span class="metric-title">Reliability</span>
@@ -74,8 +79,8 @@
             <span class="metric-value">Built-in yt-dlp version check and one-click update</span>
           </div>
           <div class="metric">
-            <span class="metric-title">Distribution</span>
-            <span class="metric-value">Windows setup, Linux AppImage, and macOS DMG via GitHub Releases</span>
+            <span class="metric-title">Acceleration</span>
+            <span class="metric-value">Manual Turbo Mode with fragment-count control for compatible streams</span>
           </div>
         </aside>
       </section>
@@ -95,8 +100,8 @@
             <p>Target full playlists or narrow ranges with include and exclude style controls.</p>
           </article> -->
           <article class="feature-card" style="--order: 2;">
-            <h3>Clip Range</h3>
-            <p>Download only the needed portion of a video by entering start and end timestamps.</p>
+            <h3>Visual Clip Studio</h3>
+            <p>Trim single videos with draggable start/end handles, a cleaner preview, and exact time inputs when needed.</p>
           </article>
           <article class="feature-card" style="--order: 3;">
             <h3>Advanced Format Picker</h3>
@@ -106,11 +111,15 @@
             <h3>Auth Recovery Flow</h3>
             <p>Fallback from browser cookies to `cookies.txt` import when extraction is blocked.</p>
           </article>
+          <article class="feature-card" style="--order: 5;">
+            <h3>Turbo Mode</h3>
+            <p>Turn on concurrent fragment downloading and choose a fragment count when compatible sources can benefit.</p>
+          </article>
           <!-- <article class="feature-card" style="--order: 5;">
             <h3>Speed Limits</h3>
             <p>Apply global and per-download bandwidth caps with human-readable limits.</p>
           </article> -->
-          <article class="feature-card" style="--order: 5;">
+          <article class="feature-card" style="--order: 6;">
             <h3>Update Awareness</h3>
             <p>Detect both app and yt-dlp updates so your downloader stays current.</p>
           </article>
@@ -131,12 +140,12 @@
           <li>
             <span class="step-num">02</span>
             <h3>Select Output</h3>
-            <p>Choose video or audio mode, quality profile, optional clip range, folder, and optional format ID.</p>
+            <p>Choose video or audio mode, quality profile, optional Clip Studio trimming, folder, and optional format ID.</p>
           </li>
           <li>
             <span class="step-num">03</span>
-            <h3>Queue + Monitor</h3>
-            <p>Add items to queue and track progress with status, speed, ETA, and logs.</p>
+            <h3>Queue + Accelerate</h3>
+            <p>Add items to queue, optionally enable Turbo Mode fragment acceleration, and monitor status, speed, ETA, and logs.</p>
           </li>
           <li>
             <span class="step-num">04</span>
@@ -162,7 +171,7 @@
           </figure>
           <figure class="shot-card">
             <img src="./assets/screenshots/ClipVideoFeat.png" alt="Clip range download settings with start and end timestamp inputs" />
-            <figcaption>Clip-range download controls for partial video extraction</figcaption>
+            <figcaption>Clip Studio workflow for precise partial-video extraction</figcaption>
           </figure>
           <figure class="shot-card">
             <img src="./assets/screenshots/ytdlpupdater.png" alt="Built-in yt-dlp updater dialog inside StreamFetch" />

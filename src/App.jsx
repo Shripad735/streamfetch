@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import ClipStudio from "./components/ClipStudio";
 import DownloadCard from "./components/DownloadCard";
 import HistoryList from "./components/HistoryList";
 import LogPanel from "./components/LogPanel";
@@ -8,8 +9,10 @@ import VideoInfoSkeleton from "./components/VideoInfoSkeleton";
 import Button from "./components/ui/Button";
 import Card from "./components/ui/Card";
 import Input from "./components/ui/Input";
+import { formatSecondsToClock, parseTimeInputToSeconds } from "./lib/time";
 
 const QUALITY_OPTIONS = ["best", "1080p", "720p", "480p", "240p", "144p"];
+const CONCURRENT_FRAGMENT_OPTIONS = [1, 4, 8, 16];
 const PROJECT_REPO_URL = "https://github.com/Shripad735/streamfetch";
 const YTDLP_COOKIE_EXPORT_GUIDE_URL = "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies";
 const RECOMMENDED_COOKIE_EXTENSION_URL =
@@ -29,48 +32,6 @@ function formatDuration(totalSeconds) {
   const seconds = Math.floor(totalSeconds % 60);
   if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
   return `${minutes}m ${seconds}s`;
-}
-
-function parseTimeInputToSeconds(value) {
-  const normalized = String(value || "").trim();
-  if (!normalized) {
-    return { seconds: null, error: "" };
-  }
-
-  if (!/^\d+(?::\d{1,2}){0,2}$/.test(normalized)) {
-    return { seconds: null, error: "Use ss, mm:ss, or hh:mm:ss." };
-  }
-
-  const parts = normalized.split(":").map((part) => Number(part));
-  if (parts.some((part) => Number.isNaN(part))) {
-    return { seconds: null, error: "Time contains invalid numbers." };
-  }
-
-  if (parts.length === 1) {
-    return { seconds: parts[0], error: "" };
-  }
-
-  if (parts.length === 2) {
-    const [minutes, seconds] = parts;
-    if (seconds >= 60) {
-      return { seconds: null, error: "Seconds must be below 60 for mm:ss." };
-    }
-    return { seconds: minutes * 60 + seconds, error: "" };
-  }
-
-  const [hours, minutes, seconds] = parts;
-  if (minutes >= 60 || seconds >= 60) {
-    return { seconds: null, error: "Minutes and seconds must be below 60 for hh:mm:ss." };
-  }
-  return { seconds: hours * 3600 + minutes * 60 + seconds, error: "" };
-}
-
-function formatSecondsToClock(totalSeconds) {
-  const safe = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-  const hours = Math.floor(safe / 3600);
-  const minutes = Math.floor((safe % 3600) / 60);
-  const seconds = safe % 60;
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function formatFormatOption(format) {
@@ -116,6 +77,7 @@ function App() {
   const [clipEnabled, setClipEnabled] = useState(false);
   const [clipStart, setClipStart] = useState("");
   const [clipEnd, setClipEnd] = useState("");
+  const [concurrentFragments, setConcurrentFragments] = useState(1);
   const [downloadFolder, setDownloadFolder] = useState("");
 
   const [jobs, setJobs] = useState([]);
@@ -469,6 +431,30 @@ function App() {
     }
   }, [videoInfo, clipEnabled]);
 
+  useEffect(() => {
+    if (!clipEnabled || videoInfo?.isPlaylist) return;
+
+    const duration = Number(videoInfo?.duration || 0) || 0;
+    if (!duration) return;
+
+    const startParsed = parseTimeInputToSeconds(clipStart);
+    const endParsed = parseTimeInputToSeconds(clipEnd);
+    const fullDuration = formatSecondsToClock(duration);
+
+    if (startParsed.seconds === null || startParsed.error || startParsed.seconds >= duration) {
+      setClipStart("00:00:00");
+    }
+
+    if (
+      endParsed.seconds === null ||
+      endParsed.error ||
+      endParsed.seconds > duration ||
+      (startParsed.seconds !== null && !startParsed.error && endParsed.seconds !== null && endParsed.seconds <= startParsed.seconds)
+    ) {
+      setClipEnd(fullDuration);
+    }
+  }, [clipEnabled, clipEnd, clipStart, videoInfo]);
+
   const getBrowserLabel = useCallback((value) => {
     const found = COOKIE_BROWSER_OPTIONS.find((item) => item.value === value);
     return found ? found.label : value;
@@ -761,7 +747,8 @@ function App() {
         clipEnabled: Boolean(clipEnabled),
         clipStart: clipRangeState.normalizedStart,
         clipEnd: clipRangeState.normalizedEnd,
-        sourceDurationSeconds: Number(videoInfo?.duration || 0) || null
+        sourceDurationSeconds: Number(videoInfo?.duration || 0) || null,
+        concurrentFragments
       });
       setSelectedJobId(result.jobId);
       pushToast({ type: "success", title: "Queued", message: "Download added to queue." });
@@ -1032,11 +1019,11 @@ function App() {
                   </Input>
                 </div>
 
-                <div className="mt-4 rounded-2xl border border-app-border bg-app-panel p-3">
+                <div className="mt-4 rounded-[30px] bg-app-panel/72 p-5 shadow-card ring-1 ring-app-border/35">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-medium text-app-text">Clip Range (Optional)</p>
-                      <p className="text-xs text-app-muted">
+                      <p className="font-display text-base font-semibold tracking-[0.01em] text-app-text">Clip Range (Optional)</p>
+                      <p className="mt-1 text-sm leading-6 text-app-muted">
                         Download only a part of the video using start and end times.
                       </p>
                     </div>
@@ -1050,6 +1037,10 @@ function App() {
                           if (!next) {
                             setClipStart("");
                             setClipEnd("");
+                          } else {
+                            const duration = Number(videoInfo?.duration || 0) || 0;
+                            setClipStart("00:00:00");
+                            setClipEnd(duration ? formatSecondsToClock(duration) : "");
                           }
                           return next;
                         });
@@ -1064,25 +1055,40 @@ function App() {
                   )}
 
                   {clipEnabled && !videoInfo?.isPlaylist && (
-                    <div className="mt-3">
-                      <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="mt-4">
+                      <ClipStudio
+                        durationSeconds={videoInfo?.duration || 0}
+                        thumbnail={videoInfo?.thumbnail || ""}
+                        startValue={clipStart}
+                        endValue={clipEnd}
+                        onStartChange={setClipStart}
+                        onEndChange={setClipEnd}
+                        disabled={!videoInfo?.duration}
+                      />
+                      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
                         <Input
+                          className="min-w-0"
                           label="Start Time"
                           value={clipStart}
                           onChange={(event) => setClipStart(event.target.value)}
-                          placeholder="00:00"
+                          placeholder="00:00:00"
+                          inputClassName="bg-app-card/70"
                         />
                         <Input
+                          className="min-w-0"
                           label="End Time"
                           value={clipEnd}
                           onChange={(event) => setClipEnd(event.target.value)}
                           placeholder={videoInfo?.duration ? formatSecondsToClock(videoInfo.duration) : "00:30"}
+                          inputClassName="bg-app-card/70"
                         />
                       </div>
-                      <p className="mt-2 text-xs text-app-muted">Use `ss`, `mm:ss`, or `hh:mm:ss` (example: `90`, `1:30`, `00:01:30`).</p>
+                      <p className="mt-3 text-sm leading-6 text-app-muted">
+                        Drag the Clip Studio handles first, then fine-tune here if needed. You can use `ss`, `mm:ss`, or `hh:mm:ss`.
+                      </p>
                       {clipRangeState.valid ? (
                         clipRangeState.normalizedStart && clipRangeState.normalizedEnd ? (
-                          <p className="mt-2 text-xs text-app-accent">
+                          <p className="mt-2 text-sm font-medium text-app-accent">
                             Clip: {clipRangeState.normalizedStart} to {clipRangeState.normalizedEnd}
                             {clipRangeState.durationSeconds !== null
                               ? ` (${formatDuration(clipRangeState.durationSeconds)})`
@@ -1094,6 +1100,58 @@ function App() {
                       )}
                     </div>
                   )}
+                </div>
+
+                <div className="mt-4 rounded-[30px] bg-app-panel/72 p-5 shadow-card ring-1 ring-app-border/35">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                    <div>
+                      <p className="font-display text-base font-semibold tracking-[0.01em] text-app-text">Download Acceleration</p>
+                      <p className="mt-1 text-sm leading-6 text-app-muted">
+                        Turbo Mode uses yt-dlp concurrent fragments on compatible streams. 
+                        Some sources may show little or no speed change.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        size="sm"
+                        variant={concurrentFragments > 1 ? "primary" : "secondary"}
+                        onClick={() => setConcurrentFragments((prev) => (prev > 1 ? 1 : 8))}
+                      >
+                        {concurrentFragments > 1 ? "Turbo On" : "Turbo Off"}
+                      </Button>
+                      <div className="flex items-center gap-2 text-sm text-app-muted">
+                        {concurrentFragments > 1 ? (
+                          <>
+                            <span className="rounded-full bg-app-infoBg px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-app-infoText">
+                              Turbo x{concurrentFragments}
+                            </span>
+                            <span>More fragments for compatible streams.</span>
+                          </>
+                        ) : (
+                          <span>Standard single-fragment mode.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-end">
+                    <p className="text-sm leading-6 text-app-muted">
+                      Fragment count matters only when Turbo is enabled, so this stays available as a lightweight advanced control.
+                    </p>
+                    <Input
+                      as="select"
+                      label="Fragment Count"
+                      value={String(concurrentFragments)}
+                      onChange={(event) => setConcurrentFragments(Number(event.target.value))}
+                      inputClassName="border-app-border/40 bg-app-bg/42 shadow-none focus:border-app-accent/35"
+                    >
+                      {CONCURRENT_FRAGMENT_OPTIONS.map((item) => (
+                        <option key={item} value={item}>
+                          {item === 1 ? "1 fragment (Standard)" : `${item} fragments`}
+                        </option>
+                      ))}
+                    </Input>
+                  </div>
                 </div>
               </Card>
 

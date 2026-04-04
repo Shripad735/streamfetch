@@ -1,3 +1,4 @@
+import Badge from "./ui/Badge";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
 
@@ -19,7 +20,10 @@ function HistoryList({ entries, onClear, onSelect }) {
             className="cursor-pointer rounded-2xl border border-app-border bg-app-bg p-3 transition-all duration-200 ease-out hover:border-app-accent/35 hover:bg-app-card"
             onClick={() => onSelect(item.id)}
           >
-            <h4 className="mb-1 line-clamp-1 font-display text-sm font-semibold text-app-text">{item.title}</h4>
+            <div className="mb-1 flex items-start justify-between gap-2">
+              <h4 className="line-clamp-1 font-display text-sm font-semibold text-app-text">{item.title}</h4>
+              {Number(item.concurrentFragments || 1) > 1 && <Badge variant="warning">Turbo x{item.concurrentFragments}</Badge>}
+            </div>
             <p className="text-xs text-app-muted">
               {(item.mode || "").toUpperCase()} | {new Date(item.updatedAt || item.createdAt || Date.now()).toLocaleString()}
             </p>

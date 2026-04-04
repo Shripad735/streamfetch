@@ -20,7 +20,7 @@ permissions:
   contents: write
 
 env:
-  YTDLP_VERSION: "2025.01.15"
+  YTDLP_VERSION: "2026.03.17"
 
 jobs:
   build-windows:

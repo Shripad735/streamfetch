@@ -30,6 +30,7 @@ function DownloadCard({ job, selected, onSelect, onPause, onResume, onCancel }) 
   const status = job.status || "queued";
   const clipSummary =
     job.clipEnabled && job.clipStart && job.clipEnd ? ` | Clip ${job.clipStart} to ${job.clipEnd}` : "";
+  const turboEnabled = Number(job.concurrentFragments || 1) > 1;
   const canPause = status === "downloading" || status === "queued";
   const canResume = status === "paused" || status === "failed" || status === "canceled";
   const canCancel = status === "downloading" || status === "queued" || status === "paused" || status === "retrying";
@@ -67,6 +68,7 @@ function DownloadCard({ job, selected, onSelect, onPause, onResume, onCancel }) 
         <Badge variant="info">{progress.toFixed(1)}%</Badge>
         <Badge variant="muted">{job.speed || "--"}</Badge>
         <Badge variant="muted">ETA {job.eta || "--:--"}</Badge>
+        {turboEnabled && <Badge variant="warning">Turbo x{job.concurrentFragments}</Badge>}
       </div>
 
       <ProgressBar value={progress} />

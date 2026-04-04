@@ -26,6 +26,7 @@ if (typeof electron === "string") {
 const { app, BrowserWindow, dialog, ipcMain, Notification, shell } = electron;
 
 const QUALITY_OPTIONS = new Set(["best", "1080p", "720p", "480p", "240p", "144p"]);
+const CONCURRENT_FRAGMENT_OPTIONS = new Set([1, 4, 8, 16]);
 const COOKIE_BROWSERS = new Set(["chrome", "edge", "firefox", "brave"]);
 const DEFAULT_COOKIE_BROWSERS = ["chrome", "edge", "firefox", "brave"];
 const APP_RELEASES_API_URL = "https://api.github.com/repos/Shripad735/streamfetch/releases/latest";
@@ -288,6 +289,18 @@ function normalizeRateLimit(input) {
   return `${match[1]}${match[2]}`;
 }
 
+function normalizeConcurrentFragments(input) {
+  if (input === null || input === undefined || input === "") {
+    return 1;
+  }
+
+  const value = Number(input);
+  if (!Number.isInteger(value) || !CONCURRENT_FRAGMENT_OPTIONS.has(value)) {
+    throw new Error("Turbo Mode fragment count must be 1, 4, 8, or 16.");
+  }
+  return value;
+}
+
 function parseRateToBytes(rate) {
   if (!rate) return null;
   const match = String(rate).match(/^(\d+(?:\.\d+)?)([KMG]?)$/i);
@@ -430,7 +443,8 @@ function loadState() {
           eta: String(rawJob.eta || ""),
           updatedAt: new Date().toISOString(),
           attempts: Number(rawJob.attempts || 0),
-          strategyIndex: Number(rawJob.strategyIndex || 0)
+          strategyIndex: Number(rawJob.strategyIndex || 0),
+          concurrentFragments: normalizeConcurrentFragments(rawJob.concurrentFragments)
         };
 
         if ([JOB_STATUS.DOWNLOADING, JOB_STATUS.QUEUED, JOB_STATUS.RETRYING].includes(job.status)) {
@@ -805,6 +819,10 @@ function buildDownloadArgs({ job, strategy, ffmpegPath, effectiveRateLimit }) {
     args.push("--limit-rate", effectiveRateLimit);
   }
 
+  if (Number(job.concurrentFragments || 1) > 1) {
+    args.push("--concurrent-fragments", String(job.concurrentFragments));
+  }
+
   if (job.allowPlaylist) {
     args.push("--yes-playlist");
     const itemSpec = buildPlaylistItemsSpec(job);
@@ -920,6 +938,9 @@ function startJob(job) {
   appendJobLog(job, `Strategy: ${strategy.name}`);
   if (effectiveRateLimit) {
     appendJobLog(job, `Speed limit: ${effectiveRateLimit}/s`);
+  }
+  if (Number(job.concurrentFragments || 1) > 1) {
+    appendJobLog(job, `Turbo mode: ${job.concurrentFragments} fragments.`);
   }
   if (job.mode === "video" && !ffmpegPath) {
     appendJobLog(job, "FFmpeg not found. Smart fallback will use single-file formats.", "warn");
@@ -1500,6 +1521,7 @@ ipcMain.handle("video:start-download", async (_event, payload) => {
   const quality = QUALITY_OPTIONS.has(payload?.quality) ? payload.quality : "best";
   const allowPlaylist = Boolean(payload?.allowPlaylist);
   const perDownloadSpeedLimit = normalizeRateLimit(payload?.perDownloadSpeedLimit || "");
+  const concurrentFragments = normalizeConcurrentFragments(payload?.concurrentFragments);
   const selectedFormatId = String(payload?.selectedFormatId || "auto").trim() || "auto";
   const clipEnabled = Boolean(payload?.clipEnabled);
   const sourceDurationSeconds = Number(payload?.sourceDurationSeconds || 0) || null;
@@ -1549,6 +1571,7 @@ ipcMain.handle("video:start-download", async (_event, payload) => {
     clipStartSeconds: clipRange.clipStartSeconds,
     clipEndSeconds: clipRange.clipEndSeconds,
     perDownloadSpeedLimit,
+    concurrentFragments,
     status: JOB_STATUS.QUEUED,
     progress: 0,
     speed: "",

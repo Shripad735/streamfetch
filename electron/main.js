@@ -23,7 +23,7 @@ if (typeof electron === "string") {
   process.exit(result.status ?? 0);
 }
 
-const { app, BrowserWindow, dialog, ipcMain, Notification, shell } = electron;
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } = electron;
 
 const QUALITY_OPTIONS = new Set(["best", "1080p", "720p", "480p", "240p", "144p"]);
 const CONCURRENT_FRAGMENT_OPTIONS = new Set([1, 4, 8, 16]);
@@ -52,11 +52,15 @@ const JOB_STATUS = {
 
 let mainWindow;
 let globalSpeedLimit = "";
+let clipboardWatcherEnabled = false;
 let runningJobId = "";
 const activeDownloads = new Map();
 const queuedJobIds = [];
 const jobsById = new Map();
 let persistTimer = null;
+let clipboardWatcherTimer = null;
+let lastClipboardText = "";
+let lastSuggestedClipboardUrl = "";
 
 function getStateFilePath() {
   return path.join(app.getPath("userData"), "streamfetch-state.json");
@@ -86,6 +90,7 @@ function createWindow() {
   }
 
   mainWindow.webContents.on("did-finish-load", () => {
+    resetClipboardWatcherState();
     sendJobsSnapshot();
   });
 }
@@ -231,6 +236,85 @@ function isValidHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+function normalizeClipboardWatcherEnabled(value) {
+  return Boolean(value);
+}
+
+function normalizeYoutubeClipboardUrl(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue || !isValidHttpUrl(rawValue)) {
+    return "";
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(rawValue);
+  } catch {
+    return "";
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(host);
+  const isShortHost = host === "youtu.be";
+  const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
+  const trimmedPath = pathname.replace(/^\/+/, "");
+
+  if (isShortHost) {
+    if (!trimmedPath) return "";
+
+    const normalized = new URL(`https://youtu.be/${trimmedPath}`);
+    const playlistId = parsed.searchParams.get("list");
+    if (playlistId) {
+      normalized.searchParams.set("list", playlistId);
+    }
+    return normalized.toString();
+  }
+
+  if (!isYoutubeHost) {
+    return "";
+  }
+
+  if (pathname === "/watch") {
+    const videoId = parsed.searchParams.get("v");
+    const playlistId = parsed.searchParams.get("list");
+    if (!videoId && !playlistId) {
+      return "";
+    }
+
+    const normalized = new URL(`https://${host}/watch`);
+    if (videoId) {
+      normalized.searchParams.set("v", videoId);
+    }
+    if (playlistId) {
+      normalized.searchParams.set("list", playlistId);
+    }
+    return normalized.toString();
+  }
+
+  if (pathname === "/playlist") {
+    const playlistId = parsed.searchParams.get("list");
+    if (!playlistId) {
+      return "";
+    }
+
+    const normalized = new URL(`https://${host}/playlist`);
+    normalized.searchParams.set("list", playlistId);
+    return normalized.toString();
+  }
+
+  const pathParts = trimmedPath.split("/").filter(Boolean);
+  if (pathParts.length < 2) {
+    return "";
+  }
+
+  const [kind, identifier] = pathParts;
+  if (!identifier || !["shorts", "live", "embed"].includes(kind)) {
+    return "";
+  }
+
+  return `https://${host}/${kind}/${identifier}`;
 }
 
 function normalizeCookieBrowser(value) {
@@ -386,6 +470,7 @@ function sendToRenderer(channel, payload) {
     mainWindow.webContents.send(channel, payload);
   }
 }
+
 function pushToast({ type, title, message, jobId }) {
   sendToRenderer("app:toast", { type, title, message, jobId, createdAt: Date.now() });
   if (Notification.isSupported()) {
@@ -407,10 +492,79 @@ function schedulePersist() {
   }, 350);
 }
 
+function getSettingsPayload() {
+  return {
+    clipboardWatcherEnabled
+  };
+}
+
+function resetClipboardWatcherState() {
+  lastClipboardText = "";
+  lastSuggestedClipboardUrl = "";
+}
+
+function shouldWatchClipboard() {
+  return Boolean(
+    clipboardWatcherEnabled &&
+      mainWindow &&
+      !mainWindow.isDestroyed() &&
+      mainWindow.webContents &&
+      !mainWindow.webContents.isLoadingMainFrame() &&
+      mainWindow.isVisible() &&
+      !mainWindow.isMinimized()
+  );
+}
+
+function pollClipboardForYoutubeUrls() {
+  if (!shouldWatchClipboard()) {
+    return;
+  }
+
+  const nextClipboardText = String(clipboard.readText() || "").trim();
+  if (!nextClipboardText) {
+    if (lastClipboardText) {
+      lastClipboardText = "";
+      lastSuggestedClipboardUrl = "";
+    }
+    return;
+  }
+
+  if (nextClipboardText === lastClipboardText) {
+    return;
+  }
+
+  lastClipboardText = nextClipboardText;
+  const normalizedUrl = normalizeYoutubeClipboardUrl(nextClipboardText);
+
+  if (!normalizedUrl) {
+    lastSuggestedClipboardUrl = "";
+    return;
+  }
+
+  if (normalizedUrl === lastSuggestedClipboardUrl) {
+    return;
+  }
+
+  lastSuggestedClipboardUrl = normalizedUrl;
+  sendToRenderer("clipboard:url-detected", {
+    url: normalizedUrl,
+    detectedAt: Date.now()
+  });
+}
+
+function startClipboardWatcher() {
+  if (clipboardWatcherTimer) {
+    return;
+  }
+
+  clipboardWatcherTimer = setInterval(pollClipboardForYoutubeUrls, 800);
+}
+
 function persistState() {
   try {
     const payload = {
       globalSpeedLimit,
+      clipboardWatcherEnabled,
       queue: [...queuedJobIds],
       jobs: getSortedJobs().slice(0, MAX_HISTORY_JOBS).map((job) => ({
         ...job,
@@ -432,6 +586,7 @@ function loadState() {
 
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
     globalSpeedLimit = normalizeRateLimit(parsed.globalSpeedLimit || "");
+    clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(parsed.clipboardWatcherEnabled);
 
     if (Array.isArray(parsed.jobs)) {
       parsed.jobs.slice(0, MAX_HISTORY_JOBS).forEach((rawJob) => {
@@ -457,6 +612,7 @@ function loadState() {
     }
   } catch {
     globalSpeedLimit = "";
+    clipboardWatcherEnabled = false;
     jobsById.clear();
     queuedJobIds.length = 0;
   }
@@ -1415,12 +1571,25 @@ ipcMain.handle("video:get-jobs", async () => ({
   globalSpeedLimit
 }));
 
+ipcMain.handle("settings:get", async () => getSettingsPayload());
+
 ipcMain.handle("settings:set-global-speed-limit", async (_event, value) => {
   globalSpeedLimit = normalizeRateLimit(value);
   sendJobsSnapshot();
   schedulePersist();
   return { success: true, globalSpeedLimit };
 });
+
+ipcMain.handle("settings:set-clipboard-watcher-enabled", async (_event, value) => {
+  clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(value);
+  resetClipboardWatcherState();
+  schedulePersist();
+  return {
+    success: true,
+    clipboardWatcherEnabled
+  };
+});
+
 ipcMain.handle("video:fetch-info", async (_event, url) => {
   const request = typeof url === "string" ? { url } : url || {};
   const normalizedUrl = String(request.url || "").trim();
@@ -1733,6 +1902,7 @@ app.whenReady().then(() => {
   ensureManagedYtDlpPath();
   loadState();
   createWindow();
+  startClipboardWatcher();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -1746,6 +1916,10 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   activeDownloads.forEach((entry) => terminateProcess(entry.process));
   activeDownloads.clear();
+  if (clipboardWatcherTimer) {
+    clearInterval(clipboardWatcherTimer);
+    clipboardWatcherTimer = null;
+  }
   if (persistTimer) {
     clearTimeout(persistTimer);
     persistTimer = null;

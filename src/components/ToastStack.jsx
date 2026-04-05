@@ -13,9 +13,17 @@ function ToastStack({ toasts, onDismiss }) {
             toast.type !== "error" && toast.type !== "success" && "border-app-border"
           )}
         >
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h4 className="font-display text-sm font-semibold text-app-text">{toast.title}</h4>
             <p className="mt-1 text-xs text-app-muted">{toast.message}</p>
+            {toast.actionLabel && typeof toast.onAction === "function" && (
+              <button
+                className="mt-3 inline-flex h-8 items-center justify-center rounded-xl border border-app-accent/20 bg-app-panel px-3 text-xs font-semibold text-app-text transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
+                onClick={() => toast.onAction()}
+              >
+                {toast.actionLabel}
+              </button>
+            )}
           </div>
           <button
             className="inline-flex h-7 w-7 items-center justify-center rounded-xl border border-app-border bg-app-bg text-xs text-app-muted transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"

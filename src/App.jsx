@@ -7,6 +7,7 @@ import ToastStack from "./components/ToastStack";
 import VideoInfoCard from "./components/VideoInfoCard";
 import VideoInfoSkeleton from "./components/VideoInfoSkeleton";
 import Button from "./components/ui/Button";
+import Badge from "./components/ui/Badge";
 import Card from "./components/ui/Card";
 import Input from "./components/ui/Input";
 import { formatSecondsToClock, parseTimeInputToSeconds } from "./lib/time";
@@ -79,6 +80,7 @@ function App() {
   const [clipEnd, setClipEnd] = useState("");
   const [concurrentFragments, setConcurrentFragments] = useState(1);
   const [downloadFolder, setDownloadFolder] = useState("");
+  const [clipboardWatcherEnabled, setClipboardWatcherEnabled] = useState(false);
 
   const [jobs, setJobs] = useState([]);
   const [runningJobId, setRunningJobId] = useState("");
@@ -107,15 +109,24 @@ function App() {
     error: ""
   });
 
+  const dismissToast = useCallback((toastId) => {
+    setToasts((prev) => prev.filter((item) => item.id !== toastId));
+  }, []);
+
   const pushToast = useCallback((input) => {
+    const id = input.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const durationMs = Number(input.durationMs || (input.actionLabel ? 10000 : 5500));
     const toast = {
-      id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      id,
       type: input.type || "info",
       title: input.title || "StreamFetch",
       message: input.message || "",
-      expiresAt: Date.now() + 5500
+      actionLabel: input.actionLabel || "",
+      onAction: typeof input.onAction === "function" ? input.onAction : null,
+      expiresAt: Number.isFinite(durationMs) && durationMs > 0 ? Date.now() + durationMs : null
     };
     setToasts((prev) => [toast, ...prev].slice(0, 8));
+    return id;
   }, []);
 
   const patchJob = useCallback((jobId, updater) => {
@@ -184,7 +195,7 @@ function App() {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setToasts((prev) => prev.filter((toast) => toast.expiresAt > Date.now()));
+      setToasts((prev) => prev.filter((toast) => toast.expiresAt === null || toast.expiresAt > Date.now()));
     }, 500);
     return () => clearInterval(timer);
   }, []);
@@ -215,6 +226,113 @@ function App() {
       disposed = true;
     };
   }, [checkAppUpdate, hasElectron]);
+
+  useEffect(() => {
+    let disposed = false;
+    if (!hasElectron || !window.electronAPI?.getSettings) return () => {};
+
+    window.electronAPI
+      .getSettings()
+      .then((payload) => {
+        if (disposed) return;
+        setClipboardWatcherEnabled(Boolean(payload?.clipboardWatcherEnabled));
+      })
+      .catch(() => {
+        if (disposed) return;
+        setClipboardWatcherEnabled(false);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [hasElectron]);
+
+  const handleFetchInfoForUrl = useCallback(
+    async (targetUrl) => {
+      if (!hasElectron) return;
+      const normalizedUrl = String(targetUrl || "").trim();
+      if (!normalizedUrl) return;
+
+      setUrl(normalizedUrl);
+      setErrorMessage("");
+      setFetchingInfo(true);
+      setVideoInfo(null);
+      closeNoFormatsPrompt();
+      setActiveCookieBrowser("");
+      setActiveCookiesFile("");
+      setCookiesFilePath("");
+      setCookiePrompt((prev) => ({ ...prev, open: false }));
+
+      try {
+        const response = await window.electronAPI.fetchVideoInfo({ url: normalizedUrl });
+        if (!response?.ok && response?.reason === "cookies_required") {
+          const supportedBrowsers =
+            Array.isArray(response.supportedBrowsers) && response.supportedBrowsers.length > 0
+              ? response.supportedBrowsers
+              : COOKIE_BROWSER_OPTIONS.map((item) => item.value);
+          setCookieBrowser(supportedBrowsers[0]);
+          setCookiePrompt({
+            open: true,
+            message: response.message || "This video requires browser cookies.",
+            url: normalizedUrl,
+            supportedBrowsers,
+            detail: "",
+            canUseCookiesFile: false,
+            source: "fetch",
+            jobId: ""
+          });
+          pushToast({
+            type: "warn",
+            title: "Authentication Needed",
+            message: "Pick a browser to retry with your logged-in cookies."
+          });
+          return;
+        }
+
+        if (!response?.ok || !response?.data) {
+          throw new Error(response?.message || "Unable to fetch metadata.");
+        }
+
+        const info = response.data;
+        setVideoInfo(info);
+        setSelectedFormatId("auto");
+        setActiveCookieBrowser("");
+        setActiveCookiesFile("");
+        if (!Array.isArray(info.formats) || info.formats.length === 0) {
+          setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
+          showNoFormatsPrompt(
+            "No downloadable formats were returned for this video.\nIt may be DRM-protected or currently unavailable for direct download."
+          );
+        }
+        pushToast({ type: "info", title: "Metadata Loaded", message: `Fetched ${info.title}` });
+      } catch (error) {
+        setErrorMessage(error.message || "Unable to fetch metadata.");
+        pushToast({ type: "error", title: "Fetch Failed", message: error.message || "Unable to fetch metadata." });
+      } finally {
+        setFetchingInfo(false);
+      }
+    },
+    [closeNoFormatsPrompt, hasElectron, pushToast, showNoFormatsPrompt]
+  );
+
+  const showClipboardDetectedToast = useCallback(
+    (detectedUrl) => {
+      const toastId = `clipboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      pushToast({
+        id: toastId,
+        type: "info",
+        title: "Clipboard Link Detected",
+        message: "Copied YouTube link ready to inspect.",
+        actionLabel: "Fetch this",
+        durationMs: 10000,
+        onAction: () => {
+          dismissToast(toastId);
+          void handleFetchInfoForUrl(detectedUrl);
+        }
+      });
+    },
+    [dismissToast, handleFetchInfoForUrl, pushToast]
+  );
 
   useEffect(() => {
     if (!hasElectron) return undefined;
@@ -300,11 +418,35 @@ function App() {
           title: payload.title,
           message: payload.message
         });
+      }),
+      window.electronAPI.onClipboardUrlDetected((payload) => {
+        const detectedUrl = String(payload?.url || "").trim();
+        if (!detectedUrl) return;
+        showClipboardDetectedToast(detectedUrl);
       })
     ];
 
     return () => unsubs.forEach((unsubscribe) => unsubscribe());
-  }, [hasElectron, patchJob, pushToast, showNoFormatsPrompt]);
+  }, [hasElectron, patchJob, pushToast, showClipboardDetectedToast, showNoFormatsPrompt]);
+
+  const handleFetchInfo = useCallback(() => {
+    void handleFetchInfoForUrl(url);
+  }, [handleFetchInfoForUrl, url]);
+
+  const handleClipboardWatcherToggle = useCallback(async () => {
+    if (!hasElectron || !window.electronAPI?.setClipboardWatcherEnabled) return;
+
+    try {
+      const response = await window.electronAPI.setClipboardWatcherEnabled(!clipboardWatcherEnabled);
+      setClipboardWatcherEnabled(Boolean(response?.clipboardWatcherEnabled));
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "Preference Failed",
+        message: error.message || "Unable to update clipboard watcher."
+      });
+    }
+  }, [clipboardWatcherEnabled, hasElectron, pushToast]);
 
   useEffect(() => {
     const currentExists = jobs.some((item) => item.id === selectedJobId);
@@ -326,6 +468,10 @@ function App() {
     () => jobs.find((item) => item.id === selectedJobId) || null,
     [jobs, selectedJobId]
   );
+  const turboEnabled = concurrentFragments > 1;
+  const accelerationStatusText = turboEnabled
+    ? "Turbo mode is active. StreamFetch will request more fragments for compatible streams."
+    : "Turbo mode is off. StreamFetch will download with the standard single-fragment strategy.";
 
   const muxedFormats = useMemo(() => {
     if (!videoInfo?.formats || mode !== "video") return [];
@@ -465,67 +611,6 @@ function App() {
     const parts = value.split(/[\\/]/);
     return parts[parts.length - 1] || value;
   }, []);
-
-  const handleFetchInfo = async () => {
-    if (!hasElectron) return;
-    setErrorMessage("");
-    setFetchingInfo(true);
-    setVideoInfo(null);
-    closeNoFormatsPrompt();
-    setActiveCookieBrowser("");
-    setActiveCookiesFile("");
-    setCookiesFilePath("");
-    setCookiePrompt((prev) => ({ ...prev, open: false }));
-
-    try {
-      const response = await window.electronAPI.fetchVideoInfo({ url: url.trim() });
-      if (!response?.ok && response?.reason === "cookies_required") {
-        const supportedBrowsers =
-          Array.isArray(response.supportedBrowsers) && response.supportedBrowsers.length > 0
-            ? response.supportedBrowsers
-            : COOKIE_BROWSER_OPTIONS.map((item) => item.value);
-        setCookieBrowser(supportedBrowsers[0]);
-        setCookiePrompt({
-          open: true,
-          message: response.message || "This video requires browser cookies.",
-          url: url.trim(),
-          supportedBrowsers,
-          detail: "",
-          canUseCookiesFile: false,
-          source: "fetch",
-          jobId: ""
-        });
-        pushToast({
-          type: "warn",
-          title: "Authentication Needed",
-          message: "Pick a browser to retry with your logged-in cookies."
-        });
-        return;
-      }
-
-      if (!response?.ok || !response?.data) {
-        throw new Error(response?.message || "Unable to fetch metadata.");
-      }
-
-      const info = response.data;
-      setVideoInfo(info);
-      setSelectedFormatId("auto");
-      setActiveCookieBrowser("");
-      setActiveCookiesFile("");
-      if (!Array.isArray(info.formats) || info.formats.length === 0) {
-        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
-        showNoFormatsPrompt(
-          "No downloadable formats were returned for this video.\nIt may be DRM-protected or currently unavailable for direct download."
-        );
-      }
-      pushToast({ type: "info", title: "Metadata Loaded", message: `Fetched ${info.title}` });
-    } catch (error) {
-      setErrorMessage(error.message || "Unable to fetch metadata.");
-      pushToast({ type: "error", title: "Fetch Failed", message: error.message || "Unable to fetch metadata." });
-    } finally {
-      setFetchingInfo(false);
-    }
-  };
 
   const handleRetryFetchWithCookies = async () => {
     if (!hasElectron || !cookiePrompt.open) return;
@@ -969,6 +1054,28 @@ function App() {
                 </div>
               </Card>
 
+              <Card className="border-app-border/70 bg-app-panel/75 p-4 md:p-5">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-display text-sm font-semibold text-app-text">Smart Clipboard Watcher</p>
+                    <p className="mt-1 text-sm leading-6 text-app-muted">
+                      Watch copied YouTube links and show a one-click in-app fetch prompt while StreamFetch is visible.
+                    </p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-app-muted">
+                      Status: {clipboardWatcherEnabled ? "Enabled" : "Disabled"}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={clipboardWatcherEnabled ? "primary" : "secondary"}
+                    onClick={handleClipboardWatcherToggle}
+                    disabled={!hasElectron}
+                  >
+                    {clipboardWatcherEnabled ? "Turn Off" : "Turn On"}
+                  </Button>
+                </div>
+              </Card>
+
               {fetchingInfo && <VideoInfoSkeleton />}
               {!fetchingInfo && videoInfo && (
                 <VideoInfoCard
@@ -1102,55 +1209,77 @@ function App() {
                   )}
                 </div>
 
-                <div className="mt-4 rounded-[30px] bg-app-panel/72 p-5 shadow-card ring-1 ring-app-border/35">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                    <div>
+                <div className="mt-4 rounded-[30px] border border-app-border/45 bg-app-panel/78 p-4 shadow-card sm:p-5">
+                  <div className="flex flex-col gap-5">
+                    <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
                       <p className="font-display text-base font-semibold tracking-[0.01em] text-app-text">Download Acceleration</p>
-                      <p className="mt-1 text-sm leading-6 text-app-muted">
-                        Turbo Mode uses yt-dlp concurrent fragments on compatible streams. 
-                        Some sources may show little or no speed change.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <Button
-                        size="sm"
-                        variant={concurrentFragments > 1 ? "primary" : "secondary"}
-                        onClick={() => setConcurrentFragments((prev) => (prev > 1 ? 1 : 8))}
-                      >
-                        {concurrentFragments > 1 ? "Turbo On" : "Turbo Off"}
-                      </Button>
-                      <div className="flex items-center gap-2 text-sm text-app-muted">
-                        {concurrentFragments > 1 ? (
-                          <>
-                            <span className="rounded-full bg-app-infoBg px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-app-infoText">
-                              Turbo x{concurrentFragments}
-                            </span>
-                            <span>More fragments for compatible streams.</span>
-                          </>
-                        ) : (
-                          <span>Standard single-fragment mode.</span>
-                        )}
+                      <div className="inline-flex rounded-[18px] border border-app-border/60 bg-app-bg/55 p-1 shadow-inner">
+                        <button
+                          type="button"
+                          className={[
+                            "min-w-[96px] rounded-[14px] px-4 py-2 text-sm font-semibold transition-all duration-200",
+                            turboEnabled ? "text-app-muted hover:text-app-text" : "bg-app-card text-app-text shadow-card"
+                          ].join(" ")}
+                          onClick={() => setConcurrentFragments(1)}
+                          aria-pressed={!turboEnabled}
+                        >
+                          Turbo Off
+                        </button>
+                        <button
+                          type="button"
+                          className={[
+                            "min-w-[96px] rounded-[14px] px-4 py-2 text-sm font-semibold transition-all duration-200",
+                            turboEnabled
+                              ? "bg-gradient-to-r from-app-accentSoft to-app-accent text-white shadow-button"
+                              : "text-app-muted hover:text-app-text"
+                          ].join(" ")}
+                          onClick={() => setConcurrentFragments((prev) => (prev > 1 ? prev : 8))}
+                          aria-pressed={turboEnabled}
+                        >
+                          Turbo On
+                        </button>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-end">
-                    <p className="text-sm leading-6 text-app-muted">
-                      Fragment count matters only when Turbo is enabled, so this stays available as a lightweight advanced control.
+                    <p className="max-w-3xl text-sm leading-6 text-app-muted">
+                      Turbo Mode uses yt-dlp concurrent fragments on compatible streams. Some sources may show little or no speed change.
                     </p>
-                    <Input
-                      as="select"
-                      label="Fragment Count"
-                      value={String(concurrentFragments)}
-                      onChange={(event) => setConcurrentFragments(Number(event.target.value))}
-                      inputClassName="border-app-border/40 bg-app-bg/42 shadow-none focus:border-app-accent/35"
-                    >
-                      {CONCURRENT_FRAGMENT_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {item === 1 ? "1 fragment (Standard)" : `${item} fragments`}
-                        </option>
-                      ))}
-                    </Input>
+
+                    <div className="rounded-[24px] border border-app-border/35 bg-app-card/50 p-4">
+                      <div className="flex flex-col gap-3">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-app-muted">Fragment Count</p>
+                          <div className={turboEnabled ? "w-full sm:w-[220px]" : "w-full sm:w-[220px] opacity-60 saturate-0"}>
+                            <Input
+                              as="select"
+                              value={String(concurrentFragments)}
+                              onChange={(event) => setConcurrentFragments(Number(event.target.value))}
+                              inputClassName="h-11 border-app-border/40 bg-app-bg/42 shadow-none focus:border-app-accent/35"
+                            >
+                              {CONCURRENT_FRAGMENT_OPTIONS.map((item) => (
+                                <option key={item} value={item}>
+                                  {item === 1 ? "1 fragment (Standard)" : `${item} fragments`}
+                                </option>
+                              ))}
+                            </Input>
+                          </div>
+                          {turboEnabled && (
+                            <Badge variant="info" className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
+                              Turbo x{concurrentFragments}
+                            </Badge>
+                          )}
+                        </div>
+
+                        <p className="text-xs leading-5 text-app-muted">
+                          {turboEnabled
+                            ? "Hint: Higher fragment counts can improve throughput on compatible streams."
+                            : "Hint: Turn Turbo on to activate multi-fragment downloading."}
+                        </p>
+                        <p className="text-xs leading-5 text-app-muted">
+                          Status: {accelerationStatusText}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -1376,9 +1505,7 @@ function App() {
 
       <ToastStack
         toasts={toasts}
-        onDismiss={(id) => {
-          setToasts((prev) => prev.filter((item) => item.id !== id));
-        }}
+        onDismiss={dismissToast}
       />
     </div>
   );

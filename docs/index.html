@@ -6,7 +6,7 @@
     <title>StreamFetch | Fast Desktop Video Downloader (Windows / macOS / Linux)</title>
     <meta
       name="description"
-      content="StreamFetch is a fast cross-platform desktop video downloader with queue controls, Visual Clip Studio, Turbo Mode fragment acceleration, smart retries, format selection, and built-in yt-dlp updates. Release artifacts are available for Windows, macOS, and Linux."
+      content="StreamFetch is a fast cross-platform desktop video downloader with queue controls, Smart Clipboard Watcher, Visual Clip Studio, refined Turbo Mode acceleration, smart retries, format selection, and built-in yt-dlp updates. Release artifacts are available for Windows, macOS, and Linux."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -42,8 +42,8 @@
           <h1>Fetch, queue, and download videos faster with desktop-level control.</h1>
           <p class="hero-text">
             StreamFetch combines Electron, React, and yt-dlp into a focused desktop app for reliable video and audio
-            downloads, including Visual Clip Studio for precise trimming, manual Turbo Mode acceleration, and guided
-            auth recovery when links need retries.
+            downloads, including Smart Clipboard Watcher for instant URL pickup, Visual Clip Studio for precise
+            trimming, a cleaner Turbo Mode acceleration panel, and guided auth recovery when links need retries.
           </p>
           <div class="hero-actions">
             <a class="btn btn-primary" href="https://github.com/Shripad735/streamfetch/releases/latest" target="_blank" rel="noreferrer">
@@ -55,9 +55,10 @@
           </div>
           <ul class="hero-points">
             <li>Queue-based workflow with per-item progress</li>
+            <li>Smart Clipboard Watcher with one-click Fetch prompt for copied YouTube links</li>
             <li>Visual Clip Studio with draggable start/end handles</li>
             <li>Pause, resume, cancel, and retry controls</li>
-            <li>Turbo Mode with concurrent fragments on compatible streams</li>
+            <li>Structured Turbo Mode controls with fragment-count tuning on compatible streams</li>
           </ul>
         </div>
         <aside class="hero-panel" aria-label="Product highlights">
@@ -65,6 +66,10 @@
           <div class="metric">
             <span class="metric-title">Formats</span>
             <span class="metric-value">Video MP4 + Audio MP3 + advanced format IDs</span>
+          </div>
+          <div class="metric">
+            <span class="metric-title">Clipboard Flow</span>
+            <span class="metric-value">Detect copied YouTube links and launch metadata fetch from an in-app toast</span>
           </div>
           <div class="metric">
             <span class="metric-title">Precision</span>
@@ -80,7 +85,7 @@
           </div>
           <div class="metric">
             <span class="metric-title">Acceleration</span>
-            <span class="metric-value">Manual Turbo Mode with fragment-count control for compatible streams</span>
+            <span class="metric-value">Refined Turbo Mode with clear on/off state, fixed fragment selector, and status feedback</span>
           </div>
         </aside>
       </section>
@@ -100,26 +105,30 @@
             <p>Target full playlists or narrow ranges with include and exclude style controls.</p>
           </article> -->
           <article class="feature-card" style="--order: 2;">
+            <h3>Smart Clipboard Watcher</h3>
+            <p>Catch copied YouTube links while the app is visible and trigger metadata fetch from an in-app action toast.</p>
+          </article>
+          <article class="feature-card" style="--order: 3;">
             <h3>Visual Clip Studio</h3>
             <p>Trim single videos with draggable start/end handles, a cleaner preview, and exact time inputs when needed.</p>
           </article>
-          <article class="feature-card" style="--order: 3;">
+          <article class="feature-card" style="--order: 4;">
             <h3>Advanced Format Picker</h3>
             <p>Pick exact format IDs when auto mode is not enough for your target output.</p>
           </article>
-          <article class="feature-card" style="--order: 4;">
+          <article class="feature-card" style="--order: 5;">
             <h3>Auth Recovery Flow</h3>
             <p>Fallback from browser cookies to `cookies.txt` import when extraction is blocked.</p>
           </article>
-          <article class="feature-card" style="--order: 5;">
-            <h3>Turbo Mode</h3>
-            <p>Turn on concurrent fragment downloading and choose a fragment count when compatible sources can benefit.</p>
+          <article class="feature-card" style="--order: 6;">
+            <h3>Turbo Mode Controls</h3>
+            <p>Use the redesigned acceleration module to switch Turbo cleanly, tune fragment count, and read status at a glance.</p>
           </article>
           <!-- <article class="feature-card" style="--order: 5;">
             <h3>Speed Limits</h3>
             <p>Apply global and per-download bandwidth caps with human-readable limits.</p>
           </article> -->
-          <article class="feature-card" style="--order: 6;">
+          <article class="feature-card" style="--order: 7;">
             <h3>Update Awareness</h3>
             <p>Detect both app and yt-dlp updates so your downloader stays current.</p>
           </article>
@@ -134,8 +143,8 @@
         <ol class="step-grid">
           <li>
             <span class="step-num">01</span>
-            <h3>Paste URL + Fetch</h3>
-            <p>Load metadata and available streams directly from yt-dlp extraction.</p>
+            <h3>Paste or Copy URL</h3>
+            <p>Paste a link manually or let Smart Clipboard Watcher surface a copied YouTube URL with a one-click Fetch action.</p>
           </li>
           <li>
             <span class="step-num">02</span>
@@ -145,7 +154,7 @@
           <li>
             <span class="step-num">03</span>
             <h3>Queue + Accelerate</h3>
-            <p>Add items to queue, optionally enable Turbo Mode fragment acceleration, and monitor status, speed, ETA, and logs.</p>
+            <p>Add items to queue, optionally enable Turbo Mode from the structured acceleration panel, and monitor status, speed, ETA, and logs.</p>
           </li>
           <li>
             <span class="step-num">04</span>
@@ -158,16 +167,16 @@
       <section class="section" id="screenshots">
         <div class="section-head">
           <p class="eyebrow">App Screens</p>
-          <h2>Compact interface with direct control over every download step</h2>
+          <h2>Compact interface with direct control over fetching, acceleration, and recovery</h2>
         </div>
         <div class="shot-grid">
           <figure class="shot-card">
             <img src="./assets/screenshots/FullScreenSS.png" alt="StreamFetch interface showing fetch controls, options, queue, and logs" />
-            <figcaption>Full app workspace with fetch controls, queue, and logs</figcaption>
+            <figcaption>Full app workspace with fetch controls, inline preferences, queue, and logs</figcaption>
           </figure>
           <figure class="shot-card">
             <img src="./assets/screenshots/PerIteamProgress.png" alt="Per-item download cards with progress, speed, ETA, and status" />
-            <figcaption>Per-item queue progress with speed, ETA, and status</figcaption>
+            <figcaption>Per-item queue progress with speed, ETA, status, and recovery controls</figcaption>
           </figure>
           <figure class="shot-card">
             <img src="./assets/screenshots/ClipVideoFeat.png" alt="Clip range download settings with start and end timestamp inputs" />
@@ -175,7 +184,7 @@
           </figure>
           <figure class="shot-card">
             <img src="./assets/screenshots/ytdlpupdater.png" alt="Built-in yt-dlp updater dialog inside StreamFetch" />
-            <figcaption>Built-in yt-dlp updater to keep extraction current</figcaption>
+            <figcaption>Built-in maintenance tools to keep extraction current</figcaption>
           </figure>
         </div>
       </section>
@@ -195,7 +204,7 @@
 
       <section class="section cta">
         <h2>Get Started with StreamFetch</h2>
-        <p>Grab the latest setup/build from GitHub Releases (Windows setup, Linux AppImage, macOS DMG) and queue your first download in under a minute.</p>
+        <p>Grab the latest setup/build from GitHub Releases (Windows setup, Linux AppImage, macOS DMG) and start fetching from pasted or copied links in under a minute.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="https://github.com/Shripad735/streamfetch/releases/latest" target="_blank" rel="noreferrer">
             Get Latest Build

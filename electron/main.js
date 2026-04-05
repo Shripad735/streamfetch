@@ -396,7 +396,8 @@ function isNoFormatsAvailable(stderrText = "", stdoutText = "") {
 function buildYoutubeRequestDirectives(client = "") {
   const directives = {
     extractorArgs: [],
-    headers: [`User-Agent: ${DEFAULT_BROWSER_USER_AGENT}`]
+    headers: [`User-Agent: ${DEFAULT_BROWSER_USER_AGENT}`],
+    jsRuntimes: ["node"]
   };
 
   if (client === YOUTUBE_ANDROID_CLIENT) {
@@ -418,6 +419,7 @@ function buildYoutubeAttemptProfiles({ hasAccountCookies = false } = {}) {
 function appendRequestDirectives(args, directives = {}) {
   const extractorArgs = Array.isArray(directives.extractorArgs) ? directives.extractorArgs : [];
   const headers = Array.isArray(directives.headers) ? directives.headers : [];
+  const jsRuntimes = Array.isArray(directives.jsRuntimes) ? directives.jsRuntimes : [];
 
   extractorArgs
     .filter(Boolean)
@@ -430,6 +432,10 @@ function appendRequestDirectives(args, directives = {}) {
     .forEach((value) => {
       args.push("--add-header", value);
     });
+
+  if (jsRuntimes.length > 0) {
+    args.push("--js-runtimes", jsRuntimes.join(","));
+  }
 }
 
 function applySourceRequestDirectives(args, url, client = "") {
@@ -998,6 +1004,7 @@ function buildVideoStrategies(job, ffmpegPath) {
   const cap = QUALITY_HEIGHT[job.quality] || null;
   const capFilter = cap ? `[height<=${cap}]` : "";
   const hasFfmpeg = Boolean(ffmpegPath);
+  const isYoutubeSource = isYoutubeUrl(job.url);
   const strategies = [];
 
   if (job.selectedFormatId && job.selectedFormatId !== "auto") {
@@ -1012,8 +1019,8 @@ function buildVideoStrategies(job, ffmpegPath) {
   if (hasFfmpeg) {
     strategies.push(
       {
-        name: "Best merged stream",
-        format: `bv*${capFilter}+ba/b${capFilter}`,
+        name: isYoutubeSource ? "Best combined or merged stream" : "Best merged stream",
+        format: isYoutubeSource ? `b${capFilter}/bv*${capFilter}+ba/b${capFilter}` : `bv*${capFilter}+ba/b${capFilter}`,
         useFfmpeg: true,
         mergeMp4: true
       },
@@ -1198,7 +1205,9 @@ async function startJob(job) {
       preflight: true
     });
 
-    if (job.mode === "video" && !job.allowPlaylist && isYoutubeUrl(job.url)) {
+    // `yt-dlp -F` can return storyboard-only YouTube results even when a direct download still succeeds.
+    const shouldProbeFormats = false;
+    if (shouldProbeFormats && job.mode === "video" && !job.allowPlaylist && isYoutubeUrl(job.url)) {
       try {
         appendJobLog(job, "Probing available formats before download.");
         const probeResult = await probeVideoFormatsWithFallback({

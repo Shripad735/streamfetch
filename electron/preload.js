@@ -13,6 +13,7 @@ function subscribe(channel, callback) {
 contextBridge.exposeInMainWorld("electronAPI", {
   fetchVideoInfo: (payload) => ipcRenderer.invoke("video:fetch-info", payload),
   getJobs: () => ipcRenderer.invoke("video:get-jobs"),
+  getSettings: () => ipcRenderer.invoke("settings:get"),
   chooseDownloadFolder: () => ipcRenderer.invoke("dialog:select-folder"),
   chooseCookiesFile: () => ipcRenderer.invoke("dialog:select-cookies-file"),
   downloadVideo: (payload) => ipcRenderer.invoke("video:start-download", payload),
@@ -21,6 +22,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   cancelDownload: (jobId) => ipcRenderer.invoke("video:cancel-download", jobId),
   clearFinished: () => ipcRenderer.invoke("video:clear-finished"),
   setGlobalSpeedLimit: (value) => ipcRenderer.invoke("settings:set-global-speed-limit", value),
+  setClipboardWatcherEnabled: (enabled) => ipcRenderer.invoke("settings:set-clipboard-watcher-enabled", enabled),
   checkAppUpdate: () => ipcRenderer.invoke("app:check-update"),
   checkYtDlpUpdate: () => ipcRenderer.invoke("ytdlp:check-update"),
   updateYtDlp: () => ipcRenderer.invoke("ytdlp:update"),
@@ -29,6 +31,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   windowToggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),
   windowClose: () => ipcRenderer.invoke("window:close"),
   onJobsUpdated: (callback) => subscribe("video:jobs-updated", callback),
+  onClipboardUrlDetected: (callback) => subscribe("clipboard:url-detected", callback),
   onToast: (callback) => subscribe("app:toast", callback),
   onDownloadProgress: (callback) => subscribe("video:download-progress", callback),
   onDownloadLog: (callback) => subscribe("video:download-log", callback),

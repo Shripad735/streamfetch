@@ -21,6 +21,7 @@ permissions:
 
 env:
   YTDLP_VERSION: "2026.03.17"
+  FFMPEG_WINDOWS_PACKAGE: "ffmpeg-8.1-essentials_build.zip"
 
 jobs:
   build-windows:
@@ -28,7 +29,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -59,7 +60,7 @@ jobs:
           Write-Host "Version guard passed: tag '$tag' matches package.json version '$pkgVersion'."
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -70,13 +71,39 @@ jobs:
       - name: Bundle Windows binaries
         shell: pwsh
         run: |
-          choco install ffmpeg -y --no-progress
           New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $ProgressPreference = "SilentlyContinue"
 
-          $ffmpegCandidates = Get-ChildItem -Path "$env:ChocolateyInstall\lib" -Filter "ffmpeg.exe" -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "\\tools\\.*\\bin\\ffmpeg\.exe$" }
+          $ffmpegBaseUrl = "https://www.gyan.dev/ffmpeg/builds/packages"
+          $ffmpegPackage = $env:FFMPEG_WINDOWS_PACKAGE
+          $ffmpegZipPath = Join-Path $env:RUNNER_TEMP $ffmpegPackage
+          $ffmpegHashPath = "$ffmpegZipPath.sha256"
+          $ffmpegExtractDir = Join-Path $env:RUNNER_TEMP "ffmpeg-windows"
+
+          Invoke-WebRequest -Uri "$ffmpegBaseUrl/$ffmpegPackage" -OutFile $ffmpegZipPath
+          Invoke-WebRequest -Uri "$ffmpegBaseUrl/$ffmpegPackage.sha256" -OutFile $ffmpegHashPath
+
+          $expectedFfmpegHash = (Get-Content -Path $ffmpegHashPath -Raw).Trim().ToUpper()
+          if (-not $expectedFfmpegHash -or $expectedFfmpegHash.Length -ne 64) {
+            Write-Error "Could not parse SHA-256 for Windows FFmpeg package."
+            exit 1
+          }
+
+          $actualFfmpegHash = (Get-FileHash -Algorithm SHA256 $ffmpegZipPath).Hash
+          if ($actualFfmpegHash -ne $expectedFfmpegHash) {
+            Write-Error "SHA-256 mismatch for Windows FFmpeg package: expected $expectedFfmpegHash, got $actualFfmpegHash."
+            exit 1
+          }
+
+          if (Test-Path $ffmpegExtractDir) {
+            Remove-Item -LiteralPath $ffmpegExtractDir -Recurse -Force
+          }
+          Expand-Archive -Path $ffmpegZipPath -DestinationPath $ffmpegExtractDir -Force
+
+          $ffmpegCandidates = Get-ChildItem -Path $ffmpegExtractDir -Filter "ffmpeg.exe" -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\bin\\ffmpeg\.exe$" }
           if (-not $ffmpegCandidates) {
-            Write-Error "Could not find FFmpeg binary in Chocolatey package files."
+            Write-Error "Could not find FFmpeg binary in downloaded package files."
             exit 1
           }
 
@@ -142,7 +169,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -171,7 +198,7 @@ jobs:
           fi
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -239,7 +266,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -268,7 +295,7 @@ jobs:
           fi
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: "npm"
@@ -338,7 +365,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

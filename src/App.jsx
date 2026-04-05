@@ -19,6 +19,11 @@ const YTDLP_COOKIE_EXPORT_GUIDE_URL = "https://github.com/yt-dlp/yt-dlp/wiki/Ext
 const RECOMMENDED_COOKIE_EXTENSION_URL =
   "https://chromewebstore.google.com/detail/cclelndahbckbenkjhflpdbgdldlbecc?utm_source=item-share-cb";
 const THEME_STORAGE_KEY = "streamfetch-theme";
+const NO_FORMATS_TITLE = "Unable To Extract Formats";
+const NO_FORMATS_ERROR_MESSAGE =
+  "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.";
+const NO_FORMATS_PROMPT_MESSAGE =
+  "Unable to extract video formats for this video.\nThis may be due to YouTube restrictions or a client mismatch.\nTry enabling authentication or retrying.";
 const COOKIE_BROWSER_OPTIONS = [
   { value: "chrome", label: "Chrome" },
   { value: "edge", label: "Edge" },
@@ -67,7 +72,7 @@ function App() {
   const [cookieFileRetrying, setCookieFileRetrying] = useState(false);
   const [noFormatsPrompt, setNoFormatsPrompt] = useState({
     open: false,
-    title: "No Downloadable Formats",
+    title: NO_FORMATS_TITLE,
     message: "",
     detail: ""
   });
@@ -141,14 +146,21 @@ function App() {
   const showNoFormatsPrompt = useCallback((message, detail = "") => {
     setNoFormatsPrompt({
       open: true,
-      title: "No Downloadable Formats",
-      message: String(message || "This video currently has no downloadable stream formats."),
+      title: NO_FORMATS_TITLE,
+      message: String(message || NO_FORMATS_PROMPT_MESSAGE),
       detail: String(detail || "").trim()
     });
   }, []);
   const closeNoFormatsPrompt = useCallback(() => {
     setNoFormatsPrompt((prev) => ({ ...prev, open: false }));
   }, []);
+  const showFormatExtractionError = useCallback(
+    (detail = "") => {
+      setErrorMessage(NO_FORMATS_ERROR_MESSAGE);
+      showNoFormatsPrompt(NO_FORMATS_PROMPT_MESSAGE, detail);
+    },
+    [showNoFormatsPrompt]
+  );
 
   const checkAppUpdate = useCallback(
     async ({ silent = false } = {}) => {
@@ -288,6 +300,10 @@ function App() {
           });
           return;
         }
+        if (!response?.ok && response?.reason === "no_formats_available") {
+          showFormatExtractionError(response?.detail || response?.message || "");
+          return;
+        }
 
         if (!response?.ok || !response?.data) {
           throw new Error(response?.message || "Unable to fetch metadata.");
@@ -299,10 +315,7 @@ function App() {
         setActiveCookieBrowser("");
         setActiveCookiesFile("");
         if (!Array.isArray(info.formats) || info.formats.length === 0) {
-          setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
-          showNoFormatsPrompt(
-            "No downloadable formats were returned for this video.\nIt may be DRM-protected or currently unavailable for direct download."
-          );
+          showFormatExtractionError();
         }
         pushToast({ type: "info", title: "Metadata Loaded", message: `Fetched ${info.title}` });
       } catch (error) {
@@ -312,7 +325,7 @@ function App() {
         setFetchingInfo(false);
       }
     },
-    [closeNoFormatsPrompt, hasElectron, pushToast, showNoFormatsPrompt]
+    [closeNoFormatsPrompt, hasElectron, pushToast, showFormatExtractionError]
   );
 
   const showClipboardDetectedToast = useCallback(
@@ -403,13 +416,7 @@ function App() {
         }
 
         if (String(payload?.reason || "") === "no_formats_available") {
-          setErrorMessage(
-            "No downloadable formats are available for this video with current access. It may be DRM-protected or unavailable."
-          );
-          showNoFormatsPrompt(
-            "This video currently has no downloadable stream formats.\nIt may be DRM-protected or temporarily unavailable.",
-            payload?.detail || payload?.message || ""
-          );
+          showFormatExtractionError(payload?.detail || payload?.message || "");
         }
       }),
       window.electronAPI.onToast((payload) => {
@@ -427,7 +434,7 @@ function App() {
     ];
 
     return () => unsubs.forEach((unsubscribe) => unsubscribe());
-  }, [hasElectron, patchJob, pushToast, showClipboardDetectedToast, showNoFormatsPrompt]);
+  }, [hasElectron, patchJob, pushToast, showClipboardDetectedToast, showFormatExtractionError]);
 
   const handleFetchInfo = useCallback(() => {
     void handleFetchInfoForUrl(url);
@@ -676,6 +683,10 @@ function App() {
         return;
       }
       if (!response?.ok || !response?.data) {
+        if (response?.reason === "no_formats_available") {
+          showFormatExtractionError(response?.detail || response?.message || "");
+          return;
+        }
         throw new Error(response?.message || "Unable to fetch metadata.");
       }
       const info = response.data;
@@ -686,10 +697,7 @@ function App() {
       setCookiesFilePath("");
       setCookiePrompt((prev) => ({ ...prev, open: false, source: "fetch", jobId: "" }));
       if (!Array.isArray(info.formats) || info.formats.length === 0) {
-        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
-        showNoFormatsPrompt(
-          "No downloadable formats were returned for this video.\nIt may be DRM-protected or currently unavailable for direct download."
-        );
+        showFormatExtractionError();
       }
       pushToast({
         type: "success",
@@ -770,6 +778,10 @@ function App() {
         cookiesFile: cookiesFilePath
       });
       if (!response?.ok || !response?.data) {
+        if (response?.reason === "no_formats_available") {
+          showFormatExtractionError(response?.detail || response?.message || "");
+          return;
+        }
         throw new Error(response?.message || "Unable to fetch metadata with cookies file.");
       }
       const info = response.data;
@@ -779,10 +791,7 @@ function App() {
       setActiveCookieBrowser("");
       setCookiePrompt((prev) => ({ ...prev, open: false, source: "fetch", jobId: "" }));
       if (!Array.isArray(info.formats) || info.formats.length === 0) {
-        setErrorMessage("No downloadable formats were returned for this video. It may be DRM-protected or unavailable.");
-        showNoFormatsPrompt(
-          "No downloadable formats were returned for this video.\nIt may be DRM-protected or currently unavailable for direct download."
-        );
+        showFormatExtractionError();
       }
       pushToast({
         type: "success",
@@ -1378,7 +1387,7 @@ function App() {
             <h3 className="font-display text-base font-semibold text-app-text">{noFormatsPrompt.title}</h3>
             <p className="mt-2 whitespace-pre-line text-sm text-app-muted">{noFormatsPrompt.message}</p>
             <p className="mt-2 text-xs text-app-muted">
-              This is usually caused by restricted/DRM streams and not by a normal app error.
+              This usually means the app could not extract a usable format list from YouTube yet. Authentication or a retry can still help.
             </p>
             {noFormatsPrompt.detail && (
               <pre className="mt-3 max-h-32 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 text-xs text-app-muted [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">

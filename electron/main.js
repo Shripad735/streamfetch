@@ -30,6 +30,12 @@ const CONCURRENT_FRAGMENT_OPTIONS = new Set([1, 4, 8, 16]);
 const COOKIE_BROWSERS = new Set(["chrome", "edge", "firefox", "brave"]);
 const DEFAULT_COOKIE_BROWSERS = ["chrome", "edge", "firefox", "brave"];
 const APP_RELEASES_API_URL = "https://api.github.com/repos/Shripad735/streamfetch/releases/latest";
+const YOUTUBE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"]);
+const YOUTUBE_WEB_SAFARI_CLIENT = "web_safari";
+const YOUTUBE_IOS_CLIENT = "ios";
+const YOUTUBE_ANDROID_CLIENT = "android";
+const DEFAULT_BROWSER_USER_AGENT = "Mozilla/5.0";
+const YTDLP_AUTO_UPDATE_TTL_MS = 6 * 60 * 60 * 1000;
 const QUALITY_HEIGHT = {
   best: null,
   "1080p": 1080,
@@ -61,6 +67,14 @@ let persistTimer = null;
 let clipboardWatcherTimer = null;
 let lastClipboardText = "";
 let lastSuggestedClipboardUrl = "";
+let ytDlpRefreshPromise = null;
+let ytDlpRefreshState = {
+  checkedAt: 0,
+  currentVersion: "",
+  latestVersion: "",
+  lastError: "",
+  updated: false
+};
 
 function getStateFilePath() {
   return path.join(app.getPath("userData"), "streamfetch-state.json");
@@ -238,6 +252,16 @@ function isValidHttpUrl(value) {
   }
 }
 
+function isYoutubeUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    const host = parsed.hostname.toLowerCase();
+    return host === "youtu.be" || YOUTUBE_HOSTS.has(host);
+  } catch {
+    return false;
+  }
+}
+
 function normalizeClipboardWatcherEnabled(value) {
   return Boolean(value);
 }
@@ -256,7 +280,7 @@ function normalizeYoutubeClipboardUrl(value) {
   }
 
   const host = parsed.hostname.toLowerCase();
-  const isYoutubeHost = ["youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"].includes(host);
+  const isYoutubeHost = YOUTUBE_HOSTS.has(host);
   const isShortHost = host === "youtu.be";
   const pathname = parsed.pathname.replace(/\/+$/, "") || "/";
   const trimmedPath = pathname.replace(/^\/+/, "");
@@ -357,10 +381,73 @@ function isBrowserCookieAccessError(stderrText) {
   );
 }
 
-function isRequestedFormatUnavailable(stderrText) {
-  const message = String(stderrText || "").toLowerCase();
+function isNoFormatsAvailable(stderrText = "", stdoutText = "") {
+  const message = `${stdoutText}\n${stderrText}`.toLowerCase();
   if (!message) return false;
-  return message.includes("requested format is not available");
+  return (
+    message.includes("requested format is not available") ||
+    message.includes("no downloadable formats") ||
+    message.includes("no formats found") ||
+    message.includes("no video formats found") ||
+    message.includes("no suitable formats")
+  );
+}
+
+function buildYoutubeRequestDirectives(client = "") {
+  const directives = {
+    extractorArgs: [],
+    headers: [`User-Agent: ${DEFAULT_BROWSER_USER_AGENT}`]
+  };
+
+  if (client === YOUTUBE_ANDROID_CLIENT) {
+    directives.extractorArgs.push(`youtube:player_client=${YOUTUBE_ANDROID_CLIENT}`);
+  }
+
+  return directives;
+}
+
+function buildYoutubeAttemptProfiles({ hasAccountCookies = false } = {}) {
+  return [
+    { client: "", label: "web" },
+    { client: YOUTUBE_WEB_SAFARI_CLIENT, label: YOUTUBE_WEB_SAFARI_CLIENT },
+    ...(!hasAccountCookies ? [{ client: YOUTUBE_IOS_CLIENT, label: YOUTUBE_IOS_CLIENT }] : []),
+    { client: YOUTUBE_ANDROID_CLIENT, label: YOUTUBE_ANDROID_CLIENT }
+  ];
+}
+
+function appendRequestDirectives(args, directives = {}) {
+  const extractorArgs = Array.isArray(directives.extractorArgs) ? directives.extractorArgs : [];
+  const headers = Array.isArray(directives.headers) ? directives.headers : [];
+
+  extractorArgs
+    .filter(Boolean)
+    .forEach((value) => {
+      args.push("--extractor-args", value);
+    });
+
+  headers
+    .filter(Boolean)
+    .forEach((value) => {
+      args.push("--add-header", value);
+    });
+}
+
+function applySourceRequestDirectives(args, url, client = "") {
+  if (!isYoutubeUrl(url)) return;
+  appendRequestDirectives(args, buildYoutubeRequestDirectives(client));
+}
+
+function extractProbeFormatIds(stdout = "") {
+  return String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("["))
+    .filter((line) => !/^[-]+$/.test(line))
+    .map((line) => line.match(/^(\S+)\s+\S+/))
+    .filter(Boolean)
+    .map((match) => match[1])
+    .filter((id) => id && id.toLowerCase() !== "id");
 }
 
 function normalizeRateLimit(input) {
@@ -878,6 +965,35 @@ function buildPlaylistItemsSpec(job) {
 
   return compressPlaylistItems(includeSet);
 }
+
+function expandStrategiesForSource(job, strategies) {
+  if (!isYoutubeUrl(job.url)) {
+    return strategies.map((strategy) => ({
+      ...strategy,
+      client: "",
+      clientLabel: "web",
+      extractorArgs: [],
+      headers: []
+    }));
+  }
+
+  const requestProfiles = buildYoutubeAttemptProfiles({
+    hasAccountCookies: Boolean(job.cookiesFile || job.cookieBrowser)
+  }).map((profile) => ({
+    client: profile.client,
+    clientLabel: profile.label
+  }));
+
+  return strategies.flatMap((strategy) =>
+    requestProfiles.map((profile) => ({
+      ...strategy,
+      client: profile.client,
+      clientLabel: profile.clientLabel,
+      ...buildYoutubeRequestDirectives(profile.client)
+    }))
+  );
+}
+
 function buildVideoStrategies(job, ffmpegPath) {
   const cap = QUALITY_HEIGHT[job.quality] || null;
   const capFilter = cap ? `[height<=${cap}]` : "";
@@ -897,7 +1013,7 @@ function buildVideoStrategies(job, ffmpegPath) {
     strategies.push(
       {
         name: "Best merged stream",
-        format: `bestvideo${capFilter}+bestaudio/best${capFilter}`,
+        format: `bv*${capFilter}+ba/b${capFilter}`,
         useFfmpeg: true,
         mergeMp4: true
       },
@@ -932,16 +1048,16 @@ function buildVideoStrategies(job, ffmpegPath) {
   }
 
   const seen = new Set();
-  return strategies.filter((strategy) => {
-    const key = `${strategy.format}|${strategy.useFfmpeg}|${strategy.mergeMp4}`;
+  return expandStrategiesForSource(job, strategies).filter((strategy) => {
+    const key = `${strategy.format}|${strategy.useFfmpeg}|${strategy.mergeMp4}|${strategy.client}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-function buildAudioStrategies() {
-  return [
+function buildAudioStrategies(job) {
+  return expandStrategiesForSource(job, [
     {
       name: "Best audio as MP3",
       format: "bestaudio/best",
@@ -952,7 +1068,7 @@ function buildAudioStrategies() {
       format: "bestaudio/best",
       extractMp3: false
     }
-  ];
+  ]);
 }
 
 function buildDownloadArgs({ job, strategy, ffmpegPath, effectiveRateLimit }) {
@@ -970,6 +1086,8 @@ function buildDownloadArgs({ job, strategy, ffmpegPath, effectiveRateLimit }) {
   } else if (job.cookieBrowser) {
     args.push("--cookies-from-browser", job.cookieBrowser);
   }
+
+  appendRequestDirectives(args, strategy);
 
   if (effectiveRateLimit) {
     args.push("--limit-rate", effectiveRateLimit);
@@ -1049,68 +1167,166 @@ function startNextQueuedJob() {
   sendJobsSnapshot();
 }
 
-function startJob(job) {
+async function startJob(job) {
   if (!job) return;
   if (runningJobId) return;
 
-  runningJobId = job.id;
-  setJobStatus(job, JOB_STATUS.DOWNLOADING, "Download started.");
-  sendJobsSnapshot();
-  schedulePersist();
-
-  const ytDlpPath = ensureManagedYtDlpPath();
-  const ffmpegPath = getFfmpegPath();
-  const strategies = job.mode === "audio" ? buildAudioStrategies() : buildVideoStrategies(job, ffmpegPath);
-
-  if (job.strategyIndex >= strategies.length) {
-    job.strategyIndex = 0;
-  }
-
-  const strategy = strategies[job.strategyIndex];
-  const effectiveRateLimit = resolveEffectiveRate(globalSpeedLimit, job.perDownloadSpeedLimit);
-  let args;
   try {
-    args = buildDownloadArgs({
-      job,
-      strategy,
-      ffmpegPath,
-      effectiveRateLimit
-    });
-  } catch (error) {
-    runningJobId = "";
-    setJobStatus(job, JOB_STATUS.FAILED, error.message || "Invalid playlist/filter configuration.");
-    pushToast({
-      type: "error",
-      title: "Job Failed",
-      message: error.message || "Invalid playlist/filter configuration.",
-      jobId: job.id
-    });
+    runningJobId = job.id;
+    setJobStatus(job, JOB_STATUS.DOWNLOADING, "Download started.");
     sendJobsSnapshot();
     schedulePersist();
-    startNextQueuedJob();
-    return;
-  }
 
-  appendJobLog(job, `Strategy: ${strategy.name}`);
-  if (effectiveRateLimit) {
-    appendJobLog(job, `Speed limit: ${effectiveRateLimit}/s`);
-  }
-  if (Number(job.concurrentFragments || 1) > 1) {
-    appendJobLog(job, `Turbo mode: ${job.concurrentFragments} fragments.`);
-  }
-  if (job.mode === "video" && !ffmpegPath) {
-    appendJobLog(job, "FFmpeg not found. Smart fallback will use single-file formats.", "warn");
-  }
+    const ytDlpPath = ensureManagedYtDlpPath();
+    const ffmpegPath = getFfmpegPath();
+    const strategies = job.mode === "audio" ? buildAudioStrategies(job) : buildVideoStrategies(job, ffmpegPath);
 
-  const child = spawn(ytDlpPath, args, { windowsHide: true });
-  activeDownloads.set(job.id, {
-    process: child,
-    canceled: false,
-    paused: false,
-    stderrBuffer: ""
-  });
+    if (job.strategyIndex >= strategies.length) {
+      job.strategyIndex = 0;
+    }
 
-  const onData = (buffer) => {
+    const strategy = strategies[job.strategyIndex];
+    const effectiveRateLimit = resolveEffectiveRate(globalSpeedLimit, job.perDownloadSpeedLimit);
+    let effectiveStrategy = strategy;
+    let args;
+
+    activeDownloads.set(job.id, {
+      process: null,
+      canceled: false,
+      paused: false,
+      stderrBuffer: "",
+      preflight: true
+    });
+
+    if (job.mode === "video" && !job.allowPlaylist && isYoutubeUrl(job.url)) {
+      try {
+        appendJobLog(job, "Probing available formats before download.");
+        const probeResult = await probeVideoFormatsWithFallback({
+          url: job.url,
+          cookiesFile: job.cookiesFile,
+          cookieBrowser: job.cookieBrowser,
+          client: strategy.client
+        });
+        const preflightEntry = activeDownloads.get(job.id);
+        if (preflightEntry?.paused) {
+          activeDownloads.delete(job.id);
+          runningJobId = "";
+          setJobStatus(job, JOB_STATUS.PAUSED, "Paused.");
+          sendJobsSnapshot();
+          schedulePersist();
+          startNextQueuedJob();
+          return;
+        }
+        if (preflightEntry?.canceled) {
+          activeDownloads.delete(job.id);
+          runningJobId = "";
+          setJobStatus(job, JOB_STATUS.CANCELED, "Canceled.");
+          sendJobsSnapshot();
+          schedulePersist();
+          startNextQueuedJob();
+          return;
+        }
+
+        if (probeResult.ok && probeResult.client !== strategy.client) {
+          effectiveStrategy = {
+            ...strategy,
+            client: probeResult.client,
+            clientLabel: probeResult.clientLabel,
+            ...buildYoutubeRequestDirectives(probeResult.client)
+          };
+          appendJobLog(job, `Format probe recovered with ${probeResult.clientLabel} client.`, "warn");
+        } else if (probeResult.noFormats) {
+          activeDownloads.delete(job.id);
+          runningJobId = "";
+
+          const hasFallback = job.strategyIndex < strategies.length - 1;
+          if (hasFallback) {
+            job.strategyIndex += 1;
+            job.attempts = Number(job.attempts || 0) + 1;
+            setJobStatus(job, JOB_STATUS.RETRYING, `Retrying with fallback #${job.strategyIndex + 1}.`);
+            queuedJobIds.unshift(job.id);
+            sendJobsSnapshot();
+            schedulePersist();
+            startNextQueuedJob();
+            return;
+          }
+
+          const detail = (probeResult.stderr || probeResult.stdout || "").trim();
+          const finalMessage = detail
+            ? `Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.\n\n${detail}`
+            : "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.";
+          setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
+          sendToRenderer("video:download-error", {
+            jobId: job.id,
+            url: job.url,
+            message: finalMessage,
+            reason: "no_formats_available",
+            detail
+          });
+          pushToast({
+            type: "error",
+            title: "Format Extraction Failed",
+            message: `${job.title || "Item"} could not expose downloadable formats.`,
+            jobId: job.id
+          });
+          sendJobsSnapshot();
+          schedulePersist();
+          startNextQueuedJob();
+          return;
+        }
+      } catch (error) {
+        appendJobLog(job, `Format probe skipped: ${error.message}`, "warn");
+      }
+    }
+
+    try {
+      args = buildDownloadArgs({
+        job,
+        strategy: effectiveStrategy,
+        ffmpegPath,
+        effectiveRateLimit
+      });
+    } catch (error) {
+      activeDownloads.delete(job.id);
+      runningJobId = "";
+      setJobStatus(job, JOB_STATUS.FAILED, error.message || "Invalid playlist/filter configuration.");
+      pushToast({
+        type: "error",
+        title: "Job Failed",
+        message: error.message || "Invalid playlist/filter configuration.",
+        jobId: job.id
+      });
+      sendJobsSnapshot();
+      schedulePersist();
+      startNextQueuedJob();
+      return;
+    }
+
+    appendJobLog(job, `Strategy: ${effectiveStrategy.name}`);
+    appendJobLog(job, `Using format: ${effectiveStrategy.format}`);
+    if (effectiveStrategy.clientLabel) {
+      appendJobLog(job, `Using client: ${effectiveStrategy.clientLabel}`);
+    }
+    if (effectiveRateLimit) {
+      appendJobLog(job, `Speed limit: ${effectiveRateLimit}/s`);
+    }
+    if (Number(job.concurrentFragments || 1) > 1) {
+      appendJobLog(job, `Turbo mode: ${job.concurrentFragments} fragments.`);
+    }
+    if (job.mode === "video" && !ffmpegPath) {
+      appendJobLog(job, "FFmpeg not found. Smart fallback will use single-file formats.", "warn");
+    }
+
+    const child = spawn(ytDlpPath, args, { windowsHide: true });
+    activeDownloads.set(job.id, {
+      process: child,
+      canceled: false,
+      paused: false,
+      stderrBuffer: "",
+      preflight: false
+    });
+
+    const onData = (buffer) => {
     const text = buffer.toString();
     const lines = text.split(/\r?\n/).filter(Boolean);
     lines.forEach((line) => {
@@ -1160,180 +1376,196 @@ function startJob(job) {
         eta: job.eta
       });
     });
-  };
+    };
 
-  child.stdout.on("data", onData);
+    child.stdout.on("data", onData);
 
-  child.stderr.on("data", (buffer) => {
-    const entry = activeDownloads.get(job.id);
-    if (entry) {
-      entry.stderrBuffer += buffer.toString();
-      activeDownloads.set(job.id, entry);
-    }
-    onData(buffer);
-  });
-  child.on("error", (error) => {
-    activeDownloads.delete(job.id);
-    runningJobId = "";
-    setJobStatus(job, JOB_STATUS.FAILED, `Failed to spawn yt-dlp: ${error.message}`);
-    sendToRenderer("video:download-error", { jobId: job.id, message: error.message });
-    pushToast({
-      type: "error",
-      title: "Download Failed",
-      message: `${job.title || "Item"} failed to start.`,
-      jobId: job.id
+    child.stderr.on("data", (buffer) => {
+      const entry = activeDownloads.get(job.id);
+      if (entry) {
+        entry.stderrBuffer += buffer.toString();
+        activeDownloads.set(job.id, entry);
+      }
+      onData(buffer);
     });
-    sendJobsSnapshot();
-    schedulePersist();
-    startNextQueuedJob();
-  });
-
-  child.on("close", (code) => {
-    const entry = activeDownloads.get(job.id);
-    activeDownloads.delete(job.id);
-    runningJobId = "";
-
-    if (entry?.paused) {
-      setJobStatus(job, JOB_STATUS.PAUSED, "Paused.");
-      sendJobsSnapshot();
-      schedulePersist();
-      startNextQueuedJob();
-      return;
-    }
-
-    if (entry?.canceled) {
-      setJobStatus(job, JOB_STATUS.CANCELED, "Canceled.");
-      sendJobsSnapshot();
-      schedulePersist();
-      startNextQueuedJob();
-      return;
-    }
-
-    if (code === 0) {
-      job.progress = 100;
-      job.speed = "";
-      job.eta = "00:00";
-      setJobStatus(job, JOB_STATUS.COMPLETED, "Download completed.");
-      sendToRenderer("video:download-progress", { jobId: job.id, percent: 100, speed: "", eta: "00:00" });
-      sendToRenderer("video:download-complete", {
-        jobId: job.id,
-        outputFolder: job.outputFolder,
-        mode: job.mode
-      });
+    child.on("error", (error) => {
+      activeDownloads.delete(job.id);
+      runningJobId = "";
+      setJobStatus(job, JOB_STATUS.FAILED, `Failed to spawn yt-dlp: ${error.message}`);
+      sendToRenderer("video:download-error", { jobId: job.id, message: error.message });
       pushToast({
-        type: "success",
-        title: "Download Complete",
-        message: `${job.title || "Item"} finished successfully.`,
+        type: "error",
+        title: "Download Failed",
+        message: `${job.title || "Item"} failed to start.`,
         jobId: job.id
       });
       sendJobsSnapshot();
       schedulePersist();
       startNextQueuedJob();
-      return;
-    }
+    });
 
-    const stderr = (entry?.stderrBuffer || "").trim();
-    const authError = needsBrowserCookies(stderr);
-    const browserAccessError = Boolean(job.cookieBrowser) && isBrowserCookieAccessError(stderr);
+    child.on("close", (code) => {
+      const entry = activeDownloads.get(job.id);
+      activeDownloads.delete(job.id);
+      runningJobId = "";
 
-    if (authError || browserAccessError) {
-      let reason = "cookies_required";
-      let promptMessage =
-        "This video needs authentication. Choose a browser or cookies.txt file, then retry.";
-      let canUseCookiesFile = true;
-
-      if (!job.cookieBrowser && !job.cookiesFile) {
-        reason = "cookies_required";
-        promptMessage =
-          "This video needs authentication for age/bot checks. Choose a browser or cookies.txt file, then retry.";
-      } else if (browserAccessError) {
-        reason = "browser_cookies_failed";
-        const browserName = job.cookieBrowser.charAt(0).toUpperCase() + job.cookieBrowser.slice(1);
-        promptMessage = `Could not read ${browserName} cookies on this system. Use cookies.txt and retry.`;
-      } else if (job.cookiesFile || job.cookieBrowser) {
-        reason = "cookies_auth_failed";
-        promptMessage =
-          "The selected cookies did not grant access to this video. Export fresh YouTube cookies and retry.";
+      if (entry?.paused) {
+        setJobStatus(job, JOB_STATUS.PAUSED, "Paused.");
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
       }
 
-      const finalMessage = stderr || "Download failed due to authentication.";
+      if (entry?.canceled) {
+        setJobStatus(job, JOB_STATUS.CANCELED, "Canceled.");
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
+      }
+
+      if (code === 0) {
+        job.progress = 100;
+        job.speed = "";
+        job.eta = "00:00";
+        setJobStatus(job, JOB_STATUS.COMPLETED, "Download completed.");
+        sendToRenderer("video:download-progress", { jobId: job.id, percent: 100, speed: "", eta: "00:00" });
+        sendToRenderer("video:download-complete", {
+          jobId: job.id,
+          outputFolder: job.outputFolder,
+          mode: job.mode
+        });
+        pushToast({
+          type: "success",
+          title: "Download Complete",
+          message: `${job.title || "Item"} finished successfully.`,
+          jobId: job.id
+        });
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
+      }
+
+      const stderr = (entry?.stderrBuffer || "").trim();
+      const authError = needsBrowserCookies(stderr);
+      const browserAccessError = Boolean(job.cookieBrowser) && isBrowserCookieAccessError(stderr);
+
+      if (authError || browserAccessError) {
+        let reason = "cookies_required";
+        let promptMessage =
+          "This video needs authentication. Choose a browser or cookies.txt file, then retry.";
+        let canUseCookiesFile = true;
+
+        if (!job.cookieBrowser && !job.cookiesFile) {
+          reason = "cookies_required";
+          promptMessage =
+            "This video needs authentication for age/bot checks. Choose a browser or cookies.txt file, then retry.";
+        } else if (browserAccessError) {
+          reason = "browser_cookies_failed";
+          const browserName = job.cookieBrowser.charAt(0).toUpperCase() + job.cookieBrowser.slice(1);
+          promptMessage = `Could not read ${browserName} cookies on this system. Use cookies.txt and retry.`;
+        } else if (job.cookiesFile || job.cookieBrowser) {
+          reason = "cookies_auth_failed";
+          promptMessage =
+            "The selected cookies did not grant access to this video. Export fresh YouTube cookies and retry.";
+        }
+
+        const finalMessage = stderr || "Download failed due to authentication.";
+        setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
+        sendToRenderer("video:download-error", {
+          jobId: job.id,
+          url: job.url,
+          message: finalMessage,
+          reason,
+          promptMessage,
+          detail: stderr || "",
+          supportedBrowsers: DEFAULT_COOKIE_BROWSERS,
+          canUseCookiesFile
+        });
+        pushToast({
+          type: "error",
+          title: "Authentication Needed",
+          message: `${job.title || "Item"} requires cookies to continue.`,
+          jobId: job.id
+        });
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
+      }
+
+      if (isNoFormatsAvailable(stderr)) {
+        const friendly =
+          "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.";
+        const finalMessage = stderr
+          ? `${friendly}\n\n${stderr}`
+          : friendly;
+        setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
+        sendToRenderer("video:download-error", {
+          jobId: job.id,
+          url: job.url,
+          message: finalMessage,
+          reason: "no_formats_available",
+          detail: stderr || ""
+        });
+        pushToast({
+          type: "error",
+          title: "Format Extraction Failed",
+          message: `${job.title || "Item"} could not expose downloadable formats.`,
+          jobId: job.id
+        });
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
+      }
+
+      const hasFallback = job.strategyIndex < strategies.length - 1;
+      if (hasFallback) {
+        job.strategyIndex += 1;
+        job.attempts = Number(job.attempts || 0) + 1;
+        setJobStatus(job, JOB_STATUS.RETRYING, `Retrying with fallback #${job.strategyIndex + 1}.`);
+        queuedJobIds.unshift(job.id);
+        sendJobsSnapshot();
+        schedulePersist();
+        startNextQueuedJob();
+        return;
+      }
+
+      const finalMessage = stderr || "Download failed after all fallback strategies.";
       setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
       sendToRenderer("video:download-error", {
         jobId: job.id,
-        url: job.url,
-        message: finalMessage,
-        reason,
-        promptMessage,
-        detail: stderr || "",
-        supportedBrowsers: DEFAULT_COOKIE_BROWSERS,
-        canUseCookiesFile
+        message: finalMessage
       });
       pushToast({
         type: "error",
-        title: "Authentication Needed",
-        message: `${job.title || "Item"} requires cookies to continue.`,
+        title: "Download Failed",
+        message: `${job.title || "Item"} failed. See logs for details.`,
         jobId: job.id
       });
       sendJobsSnapshot();
       schedulePersist();
       startNextQueuedJob();
-      return;
-    }
-
-    if (isRequestedFormatUnavailable(stderr)) {
-      const friendly =
-        "No downloadable streams were returned for this video with the current cookies/settings. The video may be DRM-protected or temporarily unavailable.";
-      const finalMessage = stderr
-        ? `${friendly}\n\n${stderr}`
-        : friendly;
-      setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
-      sendToRenderer("video:download-error", {
-        jobId: job.id,
-        url: job.url,
-        message: finalMessage,
-        reason: "no_formats_available",
-        detail: stderr || ""
-      });
-      pushToast({
-        type: "error",
-        title: "No Downloadable Formats",
-        message: `${job.title || "Item"} has no downloadable stream formats.`,
-        jobId: job.id
-      });
-      sendJobsSnapshot();
-      schedulePersist();
-      startNextQueuedJob();
-      return;
-    }
-
-    const hasFallback = job.strategyIndex < strategies.length - 1;
-    if (hasFallback) {
-      job.strategyIndex += 1;
-      job.attempts = Number(job.attempts || 0) + 1;
-      setJobStatus(job, JOB_STATUS.RETRYING, `Retrying with fallback #${job.strategyIndex + 1}.`);
-      queuedJobIds.unshift(job.id);
-      sendJobsSnapshot();
-      schedulePersist();
-      startNextQueuedJob();
-      return;
-    }
-
-    const finalMessage = stderr || "Download failed after all fallback strategies.";
-    setJobStatus(job, JOB_STATUS.FAILED, finalMessage);
-    sendToRenderer("video:download-error", {
-      jobId: job.id,
-      message: finalMessage
     });
+  } catch (error) {
+    activeDownloads.delete(job.id);
+    runningJobId = "";
+    const message = error.message || "Download failed before yt-dlp could start.";
+    setJobStatus(job, JOB_STATUS.FAILED, message);
+    sendToRenderer("video:download-error", { jobId: job.id, message });
     pushToast({
       type: "error",
       title: "Download Failed",
-      message: `${job.title || "Item"} failed. See logs for details.`,
+      message,
       jobId: job.id
     });
     sendJobsSnapshot();
     schedulePersist();
     startNextQueuedJob();
-  });
+  }
 }
 
 function runYtDlpCommand(args, { timeoutMs = 120000 } = {}) {
@@ -1482,6 +1714,270 @@ function fetchLatestYtDlpVersion() {
   });
 }
 
+async function ensureYtDlpFresh() {
+  const now = Date.now();
+  if (ytDlpRefreshState.checkedAt && now - ytDlpRefreshState.checkedAt < YTDLP_AUTO_UPDATE_TTL_MS) {
+    return ytDlpRefreshState;
+  }
+
+  if (ytDlpRefreshPromise) {
+    return ytDlpRefreshPromise;
+  }
+
+  ytDlpRefreshPromise = (async () => {
+    const current = await runYtDlpCommand(["--version"], { timeoutMs: 30000 });
+    if (current.code !== 0) {
+      throw new Error(current.stderr.trim() || "Failed to get current yt-dlp version.");
+    }
+
+    const currentVersion = current.stdout.trim();
+
+    try {
+      const latestVersion = await fetchLatestYtDlpVersion();
+      if (latestVersion && latestVersion !== currentVersion) {
+        await runYtDlpCommand(["-U"], { timeoutMs: 240000 });
+        const updated = await runYtDlpCommand(["--version"], { timeoutMs: 30000 });
+        const resolvedVersion = updated.code === 0 ? updated.stdout.trim() : currentVersion;
+        ytDlpRefreshState = {
+          checkedAt: Date.now(),
+          currentVersion: resolvedVersion,
+          latestVersion,
+          lastError: "",
+          updated: resolvedVersion !== currentVersion
+        };
+        return ytDlpRefreshState;
+      }
+
+      ytDlpRefreshState = {
+        checkedAt: Date.now(),
+        currentVersion,
+        latestVersion,
+        lastError: "",
+        updated: false
+      };
+      return ytDlpRefreshState;
+    } catch (error) {
+      ytDlpRefreshState = {
+        checkedAt: Date.now(),
+        currentVersion,
+        latestVersion: "",
+        lastError: error.message || "Unable to refresh yt-dlp automatically.",
+        updated: false
+      };
+      return ytDlpRefreshState;
+    }
+  })().finally(() => {
+    ytDlpRefreshPromise = null;
+  });
+
+  return ytDlpRefreshPromise;
+}
+
+function buildMetadataArgs({ url, cookiesFile, cookieBrowser, client = "" }) {
+  const args = ["-J", "--no-warnings", "--skip-download", "--ignore-no-formats-error"];
+  if (cookiesFile) {
+    args.push("--cookies", cookiesFile);
+  } else if (cookieBrowser) {
+    args.push("--cookies-from-browser", cookieBrowser);
+  }
+  applySourceRequestDirectives(args, url, client);
+  args.push(url);
+  return args;
+}
+
+function buildFormatProbeArgs({ url, cookiesFile, cookieBrowser, client = "" }) {
+  const args = ["-F", "--no-warnings", "--ignore-config", "--no-playlist"];
+  if (cookiesFile) {
+    args.push("--cookies", cookiesFile);
+  } else if (cookieBrowser) {
+    args.push("--cookies-from-browser", cookieBrowser);
+  }
+  applySourceRequestDirectives(args, url, client);
+  args.push(url);
+  return args;
+}
+
+function buildMetadataFormats(entry) {
+  return (entry?.formats || []).map((item) => ({
+    formatId: item.format_id || "",
+    ext: item.ext || "",
+    resolution: item.resolution || (item.height ? `${item.height}p` : "Unknown"),
+    height: item.height || null,
+    fps: item.fps || null,
+    vcodec: item.vcodec || "",
+    acodec: item.acodec || "",
+    hasVideo: item.vcodec && item.vcodec !== "none",
+    hasAudio: item.acodec && item.acodec !== "none",
+    tbr: item.tbr || null,
+    formatNote: item.format_note || ""
+  }));
+}
+
+function parseMetadataPayload(stdout) {
+  let metadata;
+  try {
+    metadata = JSON.parse(stdout);
+  } catch {
+    throw new Error("yt-dlp returned invalid metadata JSON.");
+  }
+
+  const primaryEntry =
+    Array.isArray(metadata.entries) && metadata.entries.length > 0 ? metadata.entries[0] : metadata;
+  const formats = buildMetadataFormats(primaryEntry);
+
+  return {
+    metadata,
+    primaryEntry,
+    formats
+  };
+}
+
+async function fetchVideoMetadataWithFallback({ url, cookiesFile, cookieBrowser }) {
+  const attempts = isYoutubeUrl(url)
+    ? buildYoutubeAttemptProfiles({
+        hasAccountCookies: Boolean(cookiesFile || cookieBrowser)
+      })
+    : [{ client: "", label: "default" }];
+  let pendingAuthResult = null;
+  let lastError = "";
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    const args = buildMetadataArgs({
+      url,
+      cookiesFile,
+      cookieBrowser,
+      client: attempt.client
+    });
+    const { code, stdout, stderr } = await runYtDlpCommand(args, {
+      timeoutMs: 180000
+    });
+    const message = stderr.trim() || "Failed to fetch video metadata.";
+
+    if (code !== 0) {
+      lastError = message;
+      if (cookieBrowser && isBrowserCookieAccessError(message)) {
+        const browserName = cookieBrowser.charAt(0).toUpperCase() + cookieBrowser.slice(1);
+        return {
+          ok: false,
+          reason: "browser_cookies_failed",
+          message: `Could not read ${browserName} cookies on this system. Close the browser and retry, or use a cookies.txt file.`,
+          detail: message,
+          supportedBrowsers: DEFAULT_COOKIE_BROWSERS
+        };
+      }
+      if (!cookieBrowser && !cookiesFile && needsBrowserCookies(message)) {
+        pendingAuthResult = {
+          ok: false,
+          reason: "cookies_required",
+          message:
+            "This video needs authentication from your signed-in browser session. Choose a browser and retry.",
+          supportedBrowsers: DEFAULT_COOKIE_BROWSERS
+        };
+      }
+      if (index < attempts.length - 1 && (isNoFormatsAvailable(stderr, stdout) || isYoutubeUrl(url))) {
+        continue;
+      }
+      break;
+    }
+
+    const { metadata, primaryEntry, formats } = parseMetadataPayload(stdout);
+    if (formats.length === 0 && index < attempts.length - 1) {
+      lastError = stderr.trim();
+      continue;
+    }
+
+    if (formats.length === 0) {
+      return {
+        ok: false,
+        reason: "no_formats_available",
+        message:
+          "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.",
+        detail: stderr.trim()
+      };
+    }
+
+    return {
+      ok: true,
+      data: {
+        title: primaryEntry.title || metadata.title || "Untitled",
+        thumbnail: primaryEntry.thumbnail || metadata.thumbnail || "",
+        duration: primaryEntry.duration || metadata.duration || null,
+        extractor: metadata.extractor_key || metadata.extractor || "Unknown",
+        isPlaylist: Boolean(Array.isArray(metadata.entries)),
+        playlistCount: Array.isArray(metadata.entries) ? metadata.entries.length : 0,
+        formats,
+        extractionClient: attempt.label
+      }
+    };
+  }
+
+  if (pendingAuthResult) {
+    return pendingAuthResult;
+  }
+
+  if (isNoFormatsAvailable(lastError)) {
+    return {
+      ok: false,
+      reason: "no_formats_available",
+      message:
+        "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.",
+      detail: lastError
+    };
+  }
+
+  throw new Error(lastError || "Failed to fetch video metadata.");
+}
+
+async function probeVideoFormatsWithFallback({ url, cookiesFile, cookieBrowser, client = "" }) {
+  const youtubeProfiles = buildYoutubeAttemptProfiles({
+    hasAccountCookies: Boolean(cookiesFile || cookieBrowser)
+  });
+  const attempts = isYoutubeUrl(url)
+    ? [
+        { client, label: client || "web" },
+        ...youtubeProfiles.filter((profile) => profile.client !== client)
+      ]
+    : [{ client, label: client || "web" }];
+  let lastResult = {
+    ok: false,
+    clientLabel: attempts[0]?.label || "web",
+    stdout: "",
+    stderr: ""
+  };
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    const { code, stdout, stderr } = await runYtDlpCommand(
+      buildFormatProbeArgs({
+        url,
+        cookiesFile,
+        cookieBrowser,
+        client: attempt.client
+      }),
+      { timeoutMs: 180000 }
+    );
+    const formatIds = extractProbeFormatIds(stdout);
+    const hasPlayableFormats = isYoutubeUrl(url)
+      ? formatIds.some((id) => !/^sb\d+$/i.test(id))
+      : formatIds.length > 0;
+    const noFormats = isNoFormatsAvailable(stderr, stdout) || (code === 0 && !hasPlayableFormats);
+    lastResult = {
+      ok: code === 0 && hasPlayableFormats,
+      client: attempt.client,
+      clientLabel: attempt.label,
+      stdout,
+      stderr,
+      noFormats
+    };
+    if (lastResult.ok || !noFormats || index === attempts.length - 1) {
+      return lastResult;
+    }
+  }
+
+  return lastResult;
+}
+
 ipcMain.handle("window:minimize", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.minimize();
@@ -1599,83 +2095,26 @@ ipcMain.handle("video:fetch-info", async (_event, url) => {
 
   const cookiesFile = normalizeCookiesFile(request.cookiesFile);
   const cookieBrowser = cookiesFile ? "" : normalizeCookieBrowser(request.cookieBrowser);
-  const args = ["-J", "--no-warnings", "--skip-download", "--ignore-no-formats-error"];
-  if (cookiesFile) {
-    args.push("--cookies", cookiesFile);
-  } else if (cookieBrowser) {
-    args.push("--cookies-from-browser", cookieBrowser);
-  }
-  args.push(normalizedUrl);
 
-  const { code, stdout, stderr } = await runYtDlpCommand(args, {
-    timeoutMs: 180000
+  if (isYoutubeUrl(normalizedUrl)) {
+    await ensureYtDlpFresh();
+  }
+
+  return fetchVideoMetadataWithFallback({
+    url: normalizedUrl,
+    cookiesFile,
+    cookieBrowser
   });
-
-  if (code !== 0) {
-    const message = stderr.trim() || "Failed to fetch video metadata.";
-    if (!cookieBrowser && !cookiesFile && needsBrowserCookies(message)) {
-      return {
-        ok: false,
-        reason: "cookies_required",
-        message:
-          "This video needs authentication from your signed-in browser session. Choose a browser and retry.",
-        supportedBrowsers: DEFAULT_COOKIE_BROWSERS
-      };
-    }
-    if (cookieBrowser && isBrowserCookieAccessError(message)) {
-      const browserName = cookieBrowser.charAt(0).toUpperCase() + cookieBrowser.slice(1);
-      return {
-        ok: false,
-        reason: "browser_cookies_failed",
-        message: `Could not read ${browserName} cookies on this system. Close the browser and retry, or use a cookies.txt file.`,
-        detail: message,
-        supportedBrowsers: DEFAULT_COOKIE_BROWSERS
-      };
-    }
-    throw new Error(message);
-  }
-
-  let metadata;
-  try {
-    metadata = JSON.parse(stdout);
-  } catch {
-    throw new Error("yt-dlp returned invalid metadata JSON.");
-  }
-
-  const primaryEntry =
-    Array.isArray(metadata.entries) && metadata.entries.length > 0 ? metadata.entries[0] : metadata;
-  const formats = (primaryEntry.formats || []).map((item) => ({
-    formatId: item.format_id || "",
-    ext: item.ext || "",
-    resolution: item.resolution || (item.height ? `${item.height}p` : "Unknown"),
-    height: item.height || null,
-    fps: item.fps || null,
-    vcodec: item.vcodec || "",
-    acodec: item.acodec || "",
-    hasVideo: item.vcodec && item.vcodec !== "none",
-    hasAudio: item.acodec && item.acodec !== "none",
-    tbr: item.tbr || null,
-    formatNote: item.format_note || ""
-  }));
-
-  return {
-    ok: true,
-    data: {
-      title: primaryEntry.title || metadata.title || "Untitled",
-      thumbnail: primaryEntry.thumbnail || metadata.thumbnail || "",
-      duration: primaryEntry.duration || metadata.duration || null,
-      extractor: metadata.extractor_key || metadata.extractor || "Unknown",
-      isPlaylist: Boolean(Array.isArray(metadata.entries)),
-      playlistCount: Array.isArray(metadata.entries) ? metadata.entries.length : 0,
-      formats
-    }
-  };
 });
 
 ipcMain.handle("video:start-download", async (_event, payload) => {
   const url = String(payload?.url || "").trim();
   if (!isValidHttpUrl(url)) {
     throw new Error("Enter a valid video URL before downloading.");
+  }
+
+  if (isYoutubeUrl(url)) {
+    await ensureYtDlpFresh();
   }
 
   const outputFolder = String(payload?.outputFolder || "").trim();
@@ -1778,7 +2217,9 @@ ipcMain.handle("video:pause-download", async (_event, jobId) => {
     entry.paused = true;
     activeDownloads.set(id, entry);
     appendJobLog(job, "Pause requested.");
-    terminateProcess(entry.process);
+    if (entry.process) {
+      terminateProcess(entry.process);
+    }
     sendJobsSnapshot();
     schedulePersist();
     return { success: true };
@@ -1839,7 +2280,9 @@ ipcMain.handle("video:cancel-download", async (_event, jobId) => {
     entry.canceled = true;
     activeDownloads.set(id, entry);
     appendJobLog(job, "Cancel requested.");
-    terminateProcess(entry.process);
+    if (entry.process) {
+      terminateProcess(entry.process);
+    }
     sendJobsSnapshot();
     schedulePersist();
     return { success: true };

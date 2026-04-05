@@ -1,6 +1,6 @@
 {
   "name": "streamfetch",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Desktop video downloader optimized for Windows, powered by Electron, React, and yt-dlp.",
   "main": "electron/main.js",
   "author": "StreamFetch Team",

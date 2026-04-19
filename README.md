@@ -4,25 +4,25 @@ Cross-platform desktop downloader for YouTube and other platforms, built with El
 
 ## Screenshots
 
-### Dashboard 01
+### Link & Fetch Workspace
 
 ![StreamFetch Main Dashboard](Images/Dashboard-01.png)
 
 Main dashboard for pasting a link, fetching metadata, selecting clip range, enabling Turbo download, adding items to queue, and using the built-in `yt-dlp` updater.
 
-### Dashboard 02
+### Queue Overview & Logs
 
 ![StreamFetch Active Queue](Images/Dashboard-02.png)
 
 Active queue workspace with download overview, per-job status, and inline logs for the selected item.
 
-### Dashboard 03
+### History Archive
 
 ![StreamFetch History Dashboard](Images/Dashboard-03.png)
 
 History dashboard for browsing past downloads, completed items, failed jobs, and archived activity.
 
-### Dashboard 04
+### Defaults & Updates Settings
 
 ![StreamFetch Settings Dashboard](Images/Dashboard-04.png)
 

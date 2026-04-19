@@ -48,7 +48,7 @@ body {
 .site-header,
 main,
 .site-footer {
-  width: min(1120px, calc(100% - 2.2rem));
+  width: min(1360px, calc(100% - 2.2rem));
   margin-inline: auto;
 }
 
@@ -362,13 +362,13 @@ h2 {
 .shot-showcase {
   margin-top: 1rem;
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+  grid-template-columns: 1fr;
   gap: 1rem;
 }
 
 .shot-stage {
   position: relative;
-  min-height: 760px;
+  min-height: 920px;
   border: 1px solid rgba(255, 255, 255, 0.65);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.8));
   border-radius: var(--radius);
@@ -388,8 +388,8 @@ h2 {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 253, 0.92));
   opacity: 0;
-  transform: translateY(28px) scale(0.98);
-  animation: showcase-cycle 24s infinite;
+  transform: translateX(120px) scale(0.985);
+  animation: showcase-slide 24s infinite;
   animation-delay: var(--delay);
 }
 
@@ -418,6 +418,7 @@ h2 {
 
 .shot-notes {
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
@@ -524,20 +525,20 @@ h2 {
   }
 }
 
-@keyframes showcase-cycle {
+@keyframes showcase-slide {
   0% {
     opacity: 0;
-    transform: translateY(28px) scale(0.98);
+    transform: translateX(120px) scale(0.985);
   }
   4%,
   22% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(0) scale(1);
   }
   25%,
   100% {
     opacity: 0;
-    transform: translateY(-16px) scale(1.01);
+    transform: translateX(-120px) scale(1.01);
   }
 }
 
@@ -559,7 +560,11 @@ h2 {
   }
 
   .shot-stage {
-    min-height: 620px;
+    min-height: 720px;
+  }
+
+  .shot-notes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -584,12 +589,16 @@ h2 {
   }
 
   .shot-stage {
-    min-height: 460px;
+    min-height: 520px;
     padding: 0.7rem;
   }
 
   .showcase-card {
     inset: 0.7rem;
+  }
+
+  .shot-notes {
+    grid-template-columns: 1fr;
   }
 
   main {

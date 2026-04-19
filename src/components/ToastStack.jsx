@@ -9,6 +9,7 @@ function ToastStack({ toasts, onDismiss }) {
           className={cn(
             "pointer-events-auto flex items-start justify-between gap-3 rounded-2xl border bg-app-card p-3 shadow-card",
             toast.type === "error" && "border-app-dangerBorder",
+            toast.type === "warn" && "border-app-warningBorder",
             toast.type === "success" && "border-app-successBorder",
             toast.type !== "error" && toast.type !== "success" && "border-app-border"
           )}
@@ -18,7 +19,7 @@ function ToastStack({ toasts, onDismiss }) {
             <p className="mt-1 text-xs text-app-muted">{toast.message}</p>
             {toast.actionLabel && typeof toast.onAction === "function" && (
               <button
-                className="mt-3 inline-flex h-8 items-center justify-center rounded-xl border border-app-accent/20 bg-app-panel px-3 text-xs font-semibold text-app-text transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
+                className="mt-3 inline-flex h-8 items-center justify-center rounded-xl border border-app-border bg-app-cardMuted px-3 text-xs font-semibold text-app-text transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
                 onClick={() => toast.onAction()}
               >
                 {toast.actionLabel}

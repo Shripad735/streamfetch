@@ -5,11 +5,16 @@ module.exports = {
     extend: {
       colors: {
         app: {
+          canvas: "rgb(var(--app-canvas) / <alpha-value>)",
           bg: "rgb(var(--app-bg) / <alpha-value>)",
+          sidebar: "rgb(var(--app-sidebar) / <alpha-value>)",
           card: "rgb(var(--app-card) / <alpha-value>)",
+          cardMuted: "rgb(var(--app-card-muted) / <alpha-value>)",
           accent: "rgb(var(--app-accent) / <alpha-value>)",
+          accentStrong: "rgb(var(--app-accent-strong) / <alpha-value>)",
           accentSoft: "rgb(var(--app-accent-soft) / <alpha-value>)",
           border: "rgb(var(--app-border) / <alpha-value>)",
+          borderStrong: "rgb(var(--app-border-strong) / <alpha-value>)",
           text: "rgb(var(--app-text) / <alpha-value>)",
           muted: "rgb(var(--app-muted) / <alpha-value>)",
           panel: "rgb(var(--app-panel) / <alpha-value>)",
@@ -31,14 +36,15 @@ module.exports = {
         }
       },
       fontFamily: {
-        display: ['"SF Pro Display"', '"SF Pro Text"', "SamsungOne", '"Segoe UI"', "system-ui", "sans-serif"],
-        body: ['"SF Pro Text"', '"SF Pro Display"', "SamsungOne", '"Segoe UI"', "system-ui", "sans-serif"]
+        display: ['"Aptos Display"', '"Segoe UI Variable Display"', '"Segoe UI"', "system-ui", "sans-serif"],
+        body: ['"Aptos"', '"Segoe UI Variable Text"', '"Segoe UI"', "system-ui", "sans-serif"]
       },
       boxShadow: {
-        card: "0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px rgba(17, 24, 39, 0.04)",
-        cardHover: "0 2px 6px rgba(17, 24, 39, 0.06), 0 14px 28px rgba(17, 24, 39, 0.08)",
-        button: "0 8px 20px rgba(0, 122, 255, 0.24)",
-        buttonHover: "0 10px 24px rgba(0, 122, 255, 0.3)"
+        card: "0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 30px rgba(15, 23, 42, 0.04)",
+        cardHover: "0 8px 20px rgba(15, 23, 42, 0.08)",
+        button: "0 10px 20px rgba(57, 99, 235, 0.24)",
+        buttonHover: "0 12px 24px rgba(57, 99, 235, 0.3)",
+        shell: "0 24px 60px rgba(15, 23, 42, 0.08)"
       }
     }
   },

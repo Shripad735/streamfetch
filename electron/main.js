@@ -59,6 +59,11 @@ const JOB_STATUS = {
 let mainWindow;
 let globalSpeedLimit = "";
 let clipboardWatcherEnabled = false;
+let theme = "light";
+let defaultMode = "video";
+let defaultQuality = "best";
+let defaultConcurrentFragments = 1;
+let defaultOutputFolder = "";
 let runningJobId = "";
 const activeDownloads = new Map();
 const queuedJobIds = [];
@@ -264,6 +269,53 @@ function isYoutubeUrl(value) {
 
 function normalizeClipboardWatcherEnabled(value) {
   return Boolean(value);
+}
+
+function normalizeTheme(value) {
+  return value === "dark" ? "dark" : "light";
+}
+
+function normalizeDownloadMode(value) {
+  return value === "audio" ? "audio" : "video";
+}
+
+function normalizeQualitySetting(value) {
+  return QUALITY_OPTIONS.has(value) ? value : "best";
+}
+
+function getSystemDownloadFolder() {
+  try {
+    const downloadsPath = app.getPath("downloads");
+    if (downloadsPath && fs.existsSync(downloadsPath)) {
+      return downloadsPath;
+    }
+  } catch {
+    // Fall through to documents.
+  }
+
+  try {
+    const documentsPath = app.getPath("documents");
+    if (documentsPath && fs.existsSync(documentsPath)) {
+      return documentsPath;
+    }
+  } catch {
+    // Ignore and fallback below.
+  }
+
+  return "";
+}
+
+function normalizeOutputFolder(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return getSystemDownloadFolder();
+  }
+
+  if (fs.existsSync(normalized)) {
+    return normalized;
+  }
+
+  return getSystemDownloadFolder();
 }
 
 function normalizeYoutubeClipboardUrl(value) {
@@ -587,8 +639,41 @@ function schedulePersist() {
 
 function getSettingsPayload() {
   return {
-    clipboardWatcherEnabled
+    clipboardWatcherEnabled,
+    theme,
+    defaultMode,
+    defaultQuality,
+    defaultConcurrentFragments,
+    defaultOutputFolder: normalizeOutputFolder(defaultOutputFolder),
+    globalSpeedLimit
   };
+}
+
+function applySettingsUpdate(input = {}) {
+  if (Object.prototype.hasOwnProperty.call(input, "clipboardWatcherEnabled")) {
+    clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(input.clipboardWatcherEnabled);
+    resetClipboardWatcherState();
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "theme")) {
+    theme = normalizeTheme(input.theme);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultMode")) {
+    defaultMode = normalizeDownloadMode(input.defaultMode);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultQuality")) {
+    defaultQuality = normalizeQualitySetting(input.defaultQuality);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultConcurrentFragments")) {
+    defaultConcurrentFragments = normalizeConcurrentFragments(input.defaultConcurrentFragments);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "defaultOutputFolder")) {
+    defaultOutputFolder = normalizeOutputFolder(input.defaultOutputFolder);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "globalSpeedLimit")) {
+    globalSpeedLimit = normalizeRateLimit(input.globalSpeedLimit);
+  }
+
+  return getSettingsPayload();
 }
 
 function resetClipboardWatcherState() {
@@ -658,6 +743,12 @@ function persistState() {
     const payload = {
       globalSpeedLimit,
       clipboardWatcherEnabled,
+      theme,
+      defaultMode,
+      defaultQuality,
+      defaultConcurrentFragments,
+      defaultOutputFolder: normalizeOutputFolder(defaultOutputFolder),
+      settings: getSettingsPayload(),
       queue: [...queuedJobIds],
       jobs: getSortedJobs().slice(0, MAX_HISTORY_JOBS).map((job) => ({
         ...job,
@@ -678,8 +769,20 @@ function loadState() {
     if (!fs.existsSync(statePath)) return;
 
     const parsed = JSON.parse(fs.readFileSync(statePath, "utf8"));
-    globalSpeedLimit = normalizeRateLimit(parsed.globalSpeedLimit || "");
-    clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(parsed.clipboardWatcherEnabled);
+    const parsedSettings =
+      parsed && typeof parsed.settings === "object" && parsed.settings !== null ? parsed.settings : {};
+
+    globalSpeedLimit = normalizeRateLimit(parsedSettings.globalSpeedLimit ?? parsed.globalSpeedLimit ?? "");
+    clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(
+      parsedSettings.clipboardWatcherEnabled ?? parsed.clipboardWatcherEnabled
+    );
+    theme = normalizeTheme(parsedSettings.theme ?? parsed.theme);
+    defaultMode = normalizeDownloadMode(parsedSettings.defaultMode ?? parsed.defaultMode);
+    defaultQuality = normalizeQualitySetting(parsedSettings.defaultQuality ?? parsed.defaultQuality);
+    defaultConcurrentFragments = normalizeConcurrentFragments(
+      parsedSettings.defaultConcurrentFragments ?? parsed.defaultConcurrentFragments
+    );
+    defaultOutputFolder = normalizeOutputFolder(parsedSettings.defaultOutputFolder ?? parsed.defaultOutputFolder);
 
     if (Array.isArray(parsed.jobs)) {
       parsed.jobs.slice(0, MAX_HISTORY_JOBS).forEach((rawJob) => {
@@ -706,6 +809,11 @@ function loadState() {
   } catch {
     globalSpeedLimit = "";
     clipboardWatcherEnabled = false;
+    theme = "light";
+    defaultMode = "video";
+    defaultQuality = "best";
+    defaultConcurrentFragments = 1;
+    defaultOutputFolder = getSystemDownloadFolder();
     jobsById.clear();
     queuedJobIds.length = 0;
   }
@@ -2078,20 +2186,34 @@ ipcMain.handle("video:get-jobs", async () => ({
 
 ipcMain.handle("settings:get", async () => getSettingsPayload());
 
-ipcMain.handle("settings:set-global-speed-limit", async (_event, value) => {
-  globalSpeedLimit = normalizeRateLimit(value);
+ipcMain.handle("settings:update", async (_event, payload) => {
+  const settings = applySettingsUpdate(payload || {});
   sendJobsSnapshot();
-  schedulePersist();
-  return { success: true, globalSpeedLimit };
-});
-
-ipcMain.handle("settings:set-clipboard-watcher-enabled", async (_event, value) => {
-  clipboardWatcherEnabled = normalizeClipboardWatcherEnabled(value);
-  resetClipboardWatcherState();
   schedulePersist();
   return {
     success: true,
-    clipboardWatcherEnabled
+    settings
+  };
+});
+
+ipcMain.handle("settings:set-global-speed-limit", async (_event, value) => {
+  const settings = applySettingsUpdate({ globalSpeedLimit: value });
+  sendJobsSnapshot();
+  schedulePersist();
+  return {
+    success: true,
+    globalSpeedLimit: settings.globalSpeedLimit,
+    settings
+  };
+});
+
+ipcMain.handle("settings:set-clipboard-watcher-enabled", async (_event, value) => {
+  const settings = applySettingsUpdate({ clipboardWatcherEnabled: value });
+  schedulePersist();
+  return {
+    success: true,
+    clipboardWatcherEnabled: settings.clipboardWatcherEnabled,
+    settings
   };
 });
 

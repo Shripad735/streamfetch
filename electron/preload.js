@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   fetchVideoInfo: (payload) => ipcRenderer.invoke("video:fetch-info", payload),
   getJobs: () => ipcRenderer.invoke("video:get-jobs"),
   getSettings: () => ipcRenderer.invoke("settings:get"),
+  updateSettings: (payload) => ipcRenderer.invoke("settings:update", payload),
   chooseDownloadFolder: () => ipcRenderer.invoke("dialog:select-folder"),
   chooseCookiesFile: () => ipcRenderer.invoke("dialog:select-cookies-file"),
   downloadVideo: (payload) => ipcRenderer.invoke("video:start-download", payload),

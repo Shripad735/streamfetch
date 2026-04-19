@@ -37,8 +37,12 @@ function MetricPill({ tone = "muted", label, value }) {
         : "bg-app-card/85 text-app-text ring-app-border/55";
 
   return (
-    <div className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm ring-1", toneClasses)}>
-      <span className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-70">{label}</span>
+    // <div className={cn("inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs ring-1", toneClasses)}>
+    //   <span className="text-[10px] font-semibold uppercase tracking-[0.14em] opacity-70">{label}</span>
+    //   <span className="font-semibold tabular-nums">{value}</span>
+    // </div>
+    <div className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] ring-1", toneClasses)}>
+      <span className="text-[9px] font-semibold uppercase tracking-[0.12em] opacity-70">{label}</span>
       <span className="font-semibold tabular-nums">{value}</span>
     </div>
   );
@@ -46,7 +50,6 @@ function MetricPill({ tone = "muted", label, value }) {
 
 function ClipStudio({
   durationSeconds,
-  thumbnail,
   startValue,
   endValue,
   onStartChange,
@@ -101,47 +104,41 @@ function ClipStudio({
       <div className="max-w-xl">
         <h4 className="font-display text-xl font-semibold tracking-[0.01em] text-app-text">Clip Studio</h4>
         <p className="mt-2 text-sm leading-6 text-app-muted">
-          Drag the round green handle to where the clip starts and the blue handle to where it ends. Use the time fields below only for fine adjustments.
+          Drag the round green handle to where the clip starts and the blue handle to where it ends. Use the time fields below only for fine adjustments. The highlighted section is what will be downloaded. Drag the colored handles until the clip length looks right.
         </p>
       </div>
 
-      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-        <div className="self-start overflow-hidden rounded-[28px] bg-app-card/82 shadow-card">
-          <div
-            className={cn("relative aspect-video overflow-hidden bg-app-panel", disabled && "opacity-65")}
-            style={
-              thumbnail
-                ? {
-                    backgroundImage: `linear-gradient(180deg, rgba(15, 23, 42, 0.06), rgba(15, 23, 42, 0.28)), url("${thumbnail}")`,
-                    backgroundPosition: "center",
-                    backgroundSize: "cover"
-                  }
-                : undefined
-            }
-          >
-            {!thumbnail && (
-              <div className="absolute inset-0 grid place-items-center px-6 text-center text-sm text-app-muted">
-                Preview image unavailable for this video.
-              </div>
-            )}
-
-            <div className="absolute inset-x-0 bottom-0 flex items-end justify-between bg-gradient-to-t from-black/55 via-black/10 to-transparent px-5 py-4 text-sm font-medium text-white/92">
-              <span>Preview</span>
-              <span className="tabular-nums">{safeDuration ? formatSecondsToClock(safeDuration) : "--:--:--"}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="self-start rounded-[28px] bg-app-card/76 p-5 shadow-card">
+      <div className="mt-6 rounded-[28px] bg-app-card/76 p-5 shadow-card">
+        <div className="grid items-start gap-5 xl:grid-cols-[minmax(290px,0.78fr)_minmax(0,1.22fr)]">
           {safeDuration > 0 ? (
             <>
-              <div className="flex flex-wrap gap-2">
-                <MetricPill tone="start" label="Start" value={formatSecondsToClock(timelineState.start)} />
-                <MetricPill tone="end" label="End" value={formatSecondsToClock(timelineState.end)} />
-                <MetricPill label="Length" value={formatSecondsToClock(selectedDuration)} />
+              <div className="space-y-3">
+                <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                  <MetricPill tone="start" label="Start" value={formatSecondsToClock(timelineState.start)} />
+                  <MetricPill tone="end" label="End" value={formatSecondsToClock(timelineState.end)} />
+                  <MetricPill label="Len" value={formatSecondsToClock(selectedDuration)} />
+                </div>
+
+                <div className="rounded-[22px] border border-app-border/60 bg-app-bg/70 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-app-muted">Selection summary</p>
+                  <div className="mt-3 space-y-2.5 text-sm text-app-muted">
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Clip starts at</span>
+                      <span className="font-semibold tabular-nums text-app-text">{formatSecondsToClock(timelineState.start)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Clip ends at</span>
+                      <span className="font-semibold tabular-nums text-app-text">{formatSecondsToClock(timelineState.end)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-4">
+                      <span>Total selected</span>
+                      <span className="font-semibold tabular-nums text-app-text">{formatSecondsToClock(selectedDuration)}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="mt-6 rounded-[24px] bg-app-panel/78 px-5 py-6 ring-1 ring-app-border/28">
+              <div className="rounded-[24px] bg-app-panel/78 px-5 py-5 ring-1 ring-app-border/28">
                 <div className="mb-4 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.22em]">
                   <span className="text-app-successText">Start Handle</span>
                   <span className="text-app-infoText">End Handle</span>
@@ -184,13 +181,9 @@ function ClipStudio({
                   <span className="tabular-nums">{formatTick(safeDuration)}</span>
                 </div>
               </div>
-
-              <p className="mt-4 text-sm leading-6 text-app-muted">
-                The highlighted section is what will be downloaded. Drag the colored handles until the clip length looks right.
-              </p>
             </>
           ) : (
-            <div className="rounded-[24px] bg-app-panel/78 px-4 py-5 text-sm text-app-muted ring-1 ring-app-border/28">
+            <div className="rounded-[24px] bg-app-panel/78 px-4 py-5 text-sm text-app-muted ring-1 ring-app-border/28 xl:col-span-2">
               Duration is unavailable for this item, so Clip Studio falls back to manual time entry below.
             </div>
           )}

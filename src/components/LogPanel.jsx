@@ -1,4 +1,5 @@
 import Card from "./ui/Card";
+import ScrollArea from "./ui/ScrollArea";
 import { cn } from "../lib/cn";
 
 function LogPanel({ title, lines }) {
@@ -8,7 +9,7 @@ function LogPanel({ title, lines }) {
         <h3 className="font-display text-sm font-semibold text-app-text">{title || "Status Logs"}</h3>
       </div>
 
-      <div className="min-h-[220px] min-w-0 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 font-mono text-xs leading-5 text-app-text [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
+      <ScrollArea className="min-h-[220px] min-w-0 rounded-2xl border border-app-border bg-app-bg p-3 font-mono text-xs leading-5 text-app-text">
         {lines.length === 0 ? (
           <p className="text-sm font-body text-app-muted">No logs yet.</p>
         ) : (
@@ -30,7 +31,7 @@ function LogPanel({ title, lines }) {
             );
           })
         )}
-      </div>
+      </ScrollArea>
     </Card>
   );
 }

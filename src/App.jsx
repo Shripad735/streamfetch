@@ -1,99 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ClipStudio from "./components/ClipStudio";
-import DownloadCard from "./components/DownloadCard";
-import HistoryList from "./components/HistoryList";
-import LogPanel from "./components/LogPanel";
+import AppShell from "./components/shell/AppShell";
+import CookiePromptDialog from "./components/dialogs/CookiePromptDialog";
+import NoFormatsDialog from "./components/dialogs/NoFormatsDialog";
+import HistoryView from "./components/views/HistoryView";
+import NewDownloadView from "./components/views/NewDownloadView";
+import QueueView from "./components/views/QueueView";
+import SettingsView from "./components/views/SettingsView";
 import ToastStack from "./components/ToastStack";
-import VideoInfoCard from "./components/VideoInfoCard";
-import VideoInfoSkeleton from "./components/VideoInfoSkeleton";
-import Button from "./components/ui/Button";
-import Badge from "./components/ui/Badge";
-import Card from "./components/ui/Card";
-import Input from "./components/ui/Input";
-import { formatSecondsToClock, parseTimeInputToSeconds } from "./lib/time";
-
-const QUALITY_OPTIONS = ["best", "1080p", "720p", "480p", "240p", "144p"];
-const CONCURRENT_FRAGMENT_OPTIONS = [1, 4, 8, 16];
-const PROJECT_REPO_URL = "https://github.com/Shripad735/streamfetch";
-const YTDLP_COOKIE_EXPORT_GUIDE_URL = "https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies";
-const RECOMMENDED_COOKIE_EXTENSION_URL =
-  "https://chromewebstore.google.com/detail/cclelndahbckbenkjhflpdbgdldlbecc?utm_source=item-share-cb";
-const THEME_STORAGE_KEY = "streamfetch-theme";
-const NO_FORMATS_TITLE = "Unable To Extract Formats";
-const NO_FORMATS_ERROR_MESSAGE =
-  "Unable to extract video formats. This may be due to YouTube restrictions or a client mismatch. Try enabling authentication or retrying.";
-const NO_FORMATS_PROMPT_MESSAGE =
-  "Unable to extract video formats for this video.\nThis may be due to YouTube restrictions or a client mismatch.\nTry enabling authentication or retrying.";
-const COOKIE_BROWSER_OPTIONS = [
-  { value: "chrome", label: "Chrome" },
-  { value: "edge", label: "Edge" },
-  { value: "firefox", label: "Firefox" },
-  { value: "brave", label: "Brave" }
-];
-
-function formatDuration(totalSeconds) {
-  if (!totalSeconds || Number.isNaN(totalSeconds)) return "Unknown";
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = Math.floor(totalSeconds % 60);
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  return `${minutes}m ${seconds}s`;
-}
-
-function formatFormatOption(format) {
-  const res = format.resolution || (format.height ? `${format.height}p` : "Unknown");
-  const fps = format.fps ? ` ${format.fps}fps` : "";
-  const bitrate = format.tbr ? ` ${Math.round(format.tbr)}kbps` : "";
-  const ext = format.ext ? ` ${format.ext.toUpperCase()}` : "";
-  return `${format.formatId} | ${res}${fps}${bitrate}${ext}`;
-}
+import { useDownloadJobs } from "./hooks/use-download-jobs";
+import { useDownloadWorkspace } from "./hooks/use-download-workspace";
+import { usePreferences } from "./hooks/use-preferences";
+import { useToastCenter } from "./hooks/use-toast-center";
+import {
+  COOKIE_BROWSER_OPTIONS,
+  NO_FORMATS_PROMPT_MESSAGE,
+  NO_FORMATS_TITLE,
+  PROJECT_REPO_URL,
+  RECOMMENDED_COOKIE_EXTENSION_URL,
+  VIEW_ITEMS,
+  YTDLP_COOKIE_EXPORT_GUIDE_URL
+} from "./lib/app-constants";
 
 function App() {
   const hasElectron = Boolean(window?.electronAPI);
-  const [url, setUrl] = useState("");
-  const [videoInfo, setVideoInfo] = useState(null);
-  const [fetchingInfo, setFetchingInfo] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [cookieBrowser, setCookieBrowser] = useState("chrome");
-  const [activeCookieBrowser, setActiveCookieBrowser] = useState("");
-  const [activeCookiesFile, setActiveCookiesFile] = useState("");
-  const [cookiesFilePath, setCookiesFilePath] = useState("");
-  const [cookiePrompt, setCookiePrompt] = useState({
-    open: false,
-    message: "",
-    url: "",
-    supportedBrowsers: COOKIE_BROWSER_OPTIONS.map((item) => item.value),
-    detail: "",
-    canUseCookiesFile: false,
-    source: "fetch",
-    jobId: ""
-  });
-  const [cookieRetrying, setCookieRetrying] = useState(false);
-  const [cookieFileRetrying, setCookieFileRetrying] = useState(false);
+  const [currentView, setCurrentView] = useState("new-download");
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [maximized, setMaximized] = useState(false);
   const [noFormatsPrompt, setNoFormatsPrompt] = useState({
     open: false,
     title: NO_FORMATS_TITLE,
     message: "",
     detail: ""
   });
-
-  const [mode, setMode] = useState("video");
-  const [quality, setQuality] = useState("best");
-  const [selectedFormatId, setSelectedFormatId] = useState("auto");
-  const [clipEnabled, setClipEnabled] = useState(false);
-  const [clipStart, setClipStart] = useState("");
-  const [clipEnd, setClipEnd] = useState("");
-  const [concurrentFragments, setConcurrentFragments] = useState(1);
-  const [downloadFolder, setDownloadFolder] = useState("");
-  const [clipboardWatcherEnabled, setClipboardWatcherEnabled] = useState(false);
-
-  const [jobs, setJobs] = useState([]);
-  const [runningJobId, setRunningJobId] = useState("");
-  const [selectedJobId, setSelectedJobId] = useState("");
-  const [toasts, setToasts] = useState([]);
-  const [maximized, setMaximized] = useState(false);
-  const [theme, setTheme] = useState("light");
-
   const [ytDlpState, setYtDlpState] = useState({
     checking: false,
     updating: false,
@@ -114,34 +52,21 @@ function App() {
     error: ""
   });
 
-  const dismissToast = useCallback((toastId) => {
-    setToasts((prev) => prev.filter((item) => item.id !== toastId));
-  }, []);
+  const { toasts, pushToast, dismissToast } = useToastCenter();
+  const { preferences, preferencesLoaded, updatePreferences } = usePreferences(hasElectron, pushToast);
+  const [settingsDraft, setSettingsDraft] = useState({
+    clipboardWatcherEnabled: false,
+    theme: "light",
+    defaultMode: "video",
+    defaultQuality: "best",
+    defaultConcurrentFragments: 1,
+    defaultOutputFolder: "",
+    globalSpeedLimit: ""
+  });
 
-  const pushToast = useCallback((input) => {
-    const id = input.id || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const durationMs = Number(input.durationMs || (input.actionLabel ? 10000 : 5500));
-    const toast = {
-      id,
-      type: input.type || "info",
-      title: input.title || "StreamFetch",
-      message: input.message || "",
-      actionLabel: input.actionLabel || "",
-      onAction: typeof input.onAction === "function" ? input.onAction : null,
-      expiresAt: Number.isFinite(durationMs) && durationMs > 0 ? Date.now() + durationMs : null
-    };
-    setToasts((prev) => [toast, ...prev].slice(0, 8));
-    return id;
-  }, []);
-
-  const patchJob = useCallback((jobId, updater) => {
-    setJobs((prev) =>
-      prev.map((job) => {
-        if (job.id !== jobId) return job;
-        return updater({ ...job });
-      })
-    );
-  }, []);
+  useEffect(() => {
+    setSettingsDraft(preferences);
+  }, [preferences]);
 
   const showNoFormatsPrompt = useCallback((message, detail = "") => {
     setNoFormatsPrompt({
@@ -151,185 +76,26 @@ function App() {
       detail: String(detail || "").trim()
     });
   }, []);
+
   const closeNoFormatsPrompt = useCallback(() => {
     setNoFormatsPrompt((prev) => ({ ...prev, open: false }));
   }, []);
+
   const showFormatExtractionError = useCallback(
     (detail = "") => {
-      setErrorMessage(NO_FORMATS_ERROR_MESSAGE);
       showNoFormatsPrompt(NO_FORMATS_PROMPT_MESSAGE, detail);
     },
     [showNoFormatsPrompt]
   );
 
-  const checkAppUpdate = useCallback(
-    async ({ silent = false } = {}) => {
-      if (!hasElectron || !window.electronAPI?.checkAppUpdate) return;
-      setAppUpdateState((prev) => ({
-        ...prev,
-        checking: true,
-        error: silent ? prev.error : ""
-      }));
-      try {
-        const response = await window.electronAPI.checkAppUpdate();
-        setAppUpdateState((prev) => ({
-          ...prev,
-          checking: false,
-          checked: true,
-          currentVersion: String(response.currentVersion || ""),
-          latestVersion: String(response.latestVersion || ""),
-          latestTag: String(response.latestTag || ""),
-          releaseUrl: String(response.releaseUrl || ""),
-          updateAvailable: Boolean(response.updateAvailable),
-          dismissed: Boolean(response.updateAvailable) ? prev.dismissed : false,
-          error: ""
-        }));
-      } catch (error) {
-        setAppUpdateState((prev) => ({
-          ...prev,
-          checking: false,
-          checked: true,
-          error: error.message || "App update check failed."
-        }));
-      }
+  const jobsApi = useDownloadJobs({
+    hasElectron,
+    pushToast,
+    onAuthRequired: (payload) => {
+      workspace.openCookiePromptForDownload(payload);
+      setCurrentView("new-download");
     },
-    [hasElectron]
-  );
-
-  const handleOpenAppUpdate = useCallback(async () => {
-    const target = appUpdateState.releaseUrl || "https://github.com/Shripad735/streamfetch/releases/latest";
-    if (hasElectron && window.electronAPI?.openExternal) {
-      await window.electronAPI.openExternal(target);
-      return;
-    }
-    window.open(target, "_blank", "noopener,noreferrer");
-  }, [appUpdateState.releaseUrl, hasElectron]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setToasts((prev) => prev.filter((toast) => toast.expiresAt === null || toast.expiresAt > Date.now()));
-    }, 500);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (savedTheme === "dark" || savedTheme === "light") {
-      setTheme(savedTheme);
-    }
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-  }, [theme]);
-
-  useEffect(() => {
-    let disposed = false;
-    if (!hasElectron || !window.electronAPI?.checkAppUpdate) return () => {};
-
-    const run = async () => {
-      await checkAppUpdate({ silent: true });
-      if (disposed) return;
-    };
-    run();
-
-    return () => {
-      disposed = true;
-    };
-  }, [checkAppUpdate, hasElectron]);
-
-  useEffect(() => {
-    let disposed = false;
-    if (!hasElectron || !window.electronAPI?.getSettings) return () => {};
-
-    window.electronAPI
-      .getSettings()
-      .then((payload) => {
-        if (disposed) return;
-        setClipboardWatcherEnabled(Boolean(payload?.clipboardWatcherEnabled));
-      })
-      .catch(() => {
-        if (disposed) return;
-        setClipboardWatcherEnabled(false);
-      });
-
-    return () => {
-      disposed = true;
-    };
-  }, [hasElectron]);
-
-  const handleFetchInfoForUrl = useCallback(
-    async (targetUrl) => {
-      if (!hasElectron) return;
-      const normalizedUrl = String(targetUrl || "").trim();
-      if (!normalizedUrl) return;
-
-      setUrl(normalizedUrl);
-      setErrorMessage("");
-      setFetchingInfo(true);
-      setVideoInfo(null);
-      closeNoFormatsPrompt();
-      setActiveCookieBrowser("");
-      setActiveCookiesFile("");
-      setCookiesFilePath("");
-      setCookiePrompt((prev) => ({ ...prev, open: false }));
-
-      try {
-        const response = await window.electronAPI.fetchVideoInfo({ url: normalizedUrl });
-        if (!response?.ok && response?.reason === "cookies_required") {
-          const supportedBrowsers =
-            Array.isArray(response.supportedBrowsers) && response.supportedBrowsers.length > 0
-              ? response.supportedBrowsers
-              : COOKIE_BROWSER_OPTIONS.map((item) => item.value);
-          setCookieBrowser(supportedBrowsers[0]);
-          setCookiePrompt({
-            open: true,
-            message: response.message || "This video requires browser cookies.",
-            url: normalizedUrl,
-            supportedBrowsers,
-            detail: "",
-            canUseCookiesFile: false,
-            source: "fetch",
-            jobId: ""
-          });
-          pushToast({
-            type: "warn",
-            title: "Authentication Needed",
-            message: "Pick a browser to retry with your logged-in cookies."
-          });
-          return;
-        }
-        if (!response?.ok && response?.reason === "no_formats_available") {
-          showFormatExtractionError(response?.detail || response?.message || "");
-          return;
-        }
-
-        if (!response?.ok || !response?.data) {
-          throw new Error(response?.message || "Unable to fetch metadata.");
-        }
-
-        const info = response.data;
-        setVideoInfo(info);
-        setSelectedFormatId("auto");
-        setActiveCookieBrowser("");
-        setActiveCookiesFile("");
-        if (!Array.isArray(info.formats) || info.formats.length === 0) {
-          showFormatExtractionError();
-        }
-        pushToast({ type: "info", title: "Metadata Loaded", message: `Fetched ${info.title}` });
-      } catch (error) {
-        setErrorMessage(error.message || "Unable to fetch metadata.");
-        pushToast({ type: "error", title: "Fetch Failed", message: error.message || "Unable to fetch metadata." });
-      } finally {
-        setFetchingInfo(false);
-      }
-    },
-    [closeNoFormatsPrompt, hasElectron, pushToast, showFormatExtractionError]
-  );
-
-  const showClipboardDetectedToast = useCallback(
-    (detectedUrl) => {
+    onClipboardDetected: (detectedUrl) => {
       const toastId = `clipboard-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       pushToast({
         id: toastId,
@@ -340,543 +106,67 @@ function App() {
         durationMs: 10000,
         onAction: () => {
           dismissToast(toastId);
-          void handleFetchInfoForUrl(detectedUrl);
+          setCurrentView("new-download");
+          void workspace.fetchInfoForUrl(detectedUrl);
         }
       });
     },
-    [dismissToast, handleFetchInfoForUrl, pushToast]
-  );
+    onNoFormats: showFormatExtractionError
+  });
+
+  const workspace = useDownloadWorkspace({
+    hasElectron,
+    preferences,
+    preferencesLoaded,
+    pushToast,
+    setSelectedJobId: jobsApi.setSelectedJobId,
+    selectQueueView: () => setCurrentView("active-queue"),
+    showFormatExtractionError,
+    closeNoFormatsPrompt
+  });
 
   useEffect(() => {
-    if (!hasElectron) return undefined;
+    let disposed = false;
+    if (!hasElectron || !window.electronAPI?.checkAppUpdate) return () => {};
 
-    window.electronAPI.getJobs().then((payload) => {
-      setJobs(payload.jobs || []);
-      setRunningJobId(payload.runningJobId || "");
-    });
-
-    const unsubs = [
-      window.electronAPI.onJobsUpdated((payload) => {
-        setJobs(payload.jobs || []);
-        setRunningJobId(payload.runningJobId || "");
-      }),
-      window.electronAPI.onDownloadProgress((payload) => {
-        patchJob(payload.jobId, (job) => ({
-          ...job,
-          progress: Number(payload.percent || 0),
-          speed: payload.speed || "",
-          eta: payload.eta || ""
-        }));
-      }),
-      window.electronAPI.onDownloadStatus((payload) => {
-        patchJob(payload.jobId, (job) => ({
-          ...job,
-          status: payload.status || job.status
-        }));
-      }),
-      window.electronAPI.onDownloadLog((payload) => {
-        patchJob(payload.jobId, (job) => ({
-          ...job,
-          logs: [...(job.logs || []), payload].slice(-320)
-        }));
-      }),
-      window.electronAPI.onDownloadComplete((payload) => {
-        patchJob(payload.jobId, (job) => ({ ...job, status: "completed", progress: 100 }));
-      }),
-      window.electronAPI.onDownloadError((payload) => {
-        patchJob(payload.jobId, (job) => ({ ...job, status: "failed", lastError: payload.message || "" }));
-        const isAuthIssue = ["cookies_required", "browser_cookies_failed", "cookies_auth_failed"].includes(
-          String(payload?.reason || "")
-        );
-        if (isAuthIssue) {
-          const supportedBrowsers =
-            Array.isArray(payload.supportedBrowsers) && payload.supportedBrowsers.length > 0
-              ? payload.supportedBrowsers
-              : COOKIE_BROWSER_OPTIONS.map((item) => item.value);
-          setCookieBrowser((prev) => (supportedBrowsers.includes(prev) ? prev : supportedBrowsers[0]));
-          setCookiePrompt({
-            open: true,
-            message:
-              payload.promptMessage ||
-              "This download needs authentication. Choose a browser or cookies.txt file, then retry.",
-            url: String(payload.url || "").trim(),
-            supportedBrowsers,
-            detail: payload.detail || payload.message || "",
-            canUseCookiesFile: Boolean(payload.canUseCookiesFile),
-            source: "download",
-            jobId: String(payload.jobId || "")
-          });
-          setSelectedJobId(String(payload.jobId || ""));
-          pushToast({
-            type: "warn",
-            title: "Authentication Needed",
-            message: "Apply cookies and retry this failed download."
-          });
-          return;
-        }
-
-        if (String(payload?.reason || "") === "no_formats_available") {
-          showFormatExtractionError(payload?.detail || payload?.message || "");
-        }
-      }),
-      window.electronAPI.onToast((payload) => {
-        pushToast({
-          type: payload.type,
-          title: payload.title,
-          message: payload.message
-        });
-      }),
-      window.electronAPI.onClipboardUrlDetected((payload) => {
-        const detectedUrl = String(payload?.url || "").trim();
-        if (!detectedUrl) return;
-        showClipboardDetectedToast(detectedUrl);
-      })
-    ];
-
-    return () => unsubs.forEach((unsubscribe) => unsubscribe());
-  }, [hasElectron, patchJob, pushToast, showClipboardDetectedToast, showFormatExtractionError]);
-
-  const handleFetchInfo = useCallback(() => {
-    void handleFetchInfoForUrl(url);
-  }, [handleFetchInfoForUrl, url]);
-
-  const handleClipboardWatcherToggle = useCallback(async () => {
-    if (!hasElectron || !window.electronAPI?.setClipboardWatcherEnabled) return;
-
-    try {
-      const response = await window.electronAPI.setClipboardWatcherEnabled(!clipboardWatcherEnabled);
-      setClipboardWatcherEnabled(Boolean(response?.clipboardWatcherEnabled));
-    } catch (error) {
-      pushToast({
-        type: "error",
-        title: "Preference Failed",
-        message: error.message || "Unable to update clipboard watcher."
-      });
-    }
-  }, [clipboardWatcherEnabled, hasElectron, pushToast]);
-
-  useEffect(() => {
-    const currentExists = jobs.some((item) => item.id === selectedJobId);
-    if (currentExists) return;
-
-    const active = jobs.find((item) => item.id === runningJobId) || jobs[0];
-    setSelectedJobId(active?.id || "");
-  }, [jobs, selectedJobId, runningJobId]);
-
-  const activeJobs = useMemo(
-    () => jobs.filter((job) => !["completed", "failed", "canceled"].includes(job.status)),
-    [jobs]
-  );
-  const historyJobs = useMemo(
-    () => jobs.filter((job) => ["completed", "failed", "canceled"].includes(job.status)),
-    [jobs]
-  );
-  const selectedJob = useMemo(
-    () => jobs.find((item) => item.id === selectedJobId) || null,
-    [jobs, selectedJobId]
-  );
-  const turboEnabled = concurrentFragments > 1;
-  const accelerationStatusText = turboEnabled
-    ? "Turbo mode is active. StreamFetch will request more fragments for compatible streams."
-    : "Turbo mode is off. StreamFetch will download with the standard single-fragment strategy.";
-
-  const muxedFormats = useMemo(() => {
-    if (!videoInfo?.formats || mode !== "video") return [];
-    const seen = new Set();
-    return videoInfo.formats
-      .filter((item) => item.hasVideo && item.hasAudio)
-      .sort((a, b) => {
-        const aHeight = Number(a.height || 0);
-        const bHeight = Number(b.height || 0);
-        if (aHeight !== bHeight) return bHeight - aHeight;
-        return Number(b.tbr || 0) - Number(a.tbr || 0);
-      })
-      .filter((item) => {
-        if (!item.formatId || seen.has(item.formatId)) return false;
-        seen.add(item.formatId);
-        return true;
-      })
-      .slice(0, 40);
-  }, [videoInfo, mode]);
-
-  const clipRangeState = useMemo(() => {
-    if (!clipEnabled) {
-      return {
-        valid: true,
-        error: "",
-        normalizedStart: "",
-        normalizedEnd: "",
-        durationSeconds: null
-      };
-    }
-
-    if (videoInfo?.isPlaylist) {
-      return {
-        valid: false,
-        error: "Clip range works only for single videos, not playlists.",
-        normalizedStart: "",
-        normalizedEnd: "",
-        durationSeconds: null
-      };
-    }
-
-    const startParsed = parseTimeInputToSeconds(clipStart);
-    const endParsed = parseTimeInputToSeconds(clipEnd);
-    if (startParsed.error) {
-      return { valid: false, error: `Start time: ${startParsed.error}`, normalizedStart: "", normalizedEnd: "", durationSeconds: null };
-    }
-    if (endParsed.error) {
-      return { valid: false, error: `End time: ${endParsed.error}`, normalizedStart: "", normalizedEnd: "", durationSeconds: null };
-    }
-    if (startParsed.seconds === null || endParsed.seconds === null) {
-      return {
-        valid: false,
-        error: "Enter both clip start and end.",
-        normalizedStart: "",
-        normalizedEnd: "",
-        durationSeconds: null
-      };
-    }
-    if (endParsed.seconds <= startParsed.seconds) {
-      return {
-        valid: false,
-        error: "End time must be greater than start time.",
-        normalizedStart: "",
-        normalizedEnd: "",
-        durationSeconds: null
-      };
-    }
-
-    const sourceDuration = Number(videoInfo?.duration || 0) || null;
-    if (sourceDuration) {
-      if (startParsed.seconds >= sourceDuration) {
-        return {
-          valid: false,
-          error: "Start time must be inside the video duration.",
-          normalizedStart: "",
-          normalizedEnd: "",
-          durationSeconds: null
-        };
-      }
-      if (endParsed.seconds > sourceDuration) {
-        return {
-          valid: false,
-          error: "End time cannot exceed the video duration.",
-          normalizedStart: "",
-          normalizedEnd: "",
-          durationSeconds: null
-        };
-      }
-    }
-
-    return {
-      valid: true,
-      error: "",
-      normalizedStart: formatSecondsToClock(startParsed.seconds),
-      normalizedEnd: formatSecondsToClock(endParsed.seconds),
-      durationSeconds: endParsed.seconds - startParsed.seconds
-    };
-  }, [clipEnabled, clipStart, clipEnd, videoInfo]);
-
-  useEffect(() => {
-    if (videoInfo?.isPlaylist && clipEnabled) {
-      setClipEnabled(false);
-    }
-  }, [videoInfo, clipEnabled]);
-
-  useEffect(() => {
-    if (!clipEnabled || videoInfo?.isPlaylist) return;
-
-    const duration = Number(videoInfo?.duration || 0) || 0;
-    if (!duration) return;
-
-    const startParsed = parseTimeInputToSeconds(clipStart);
-    const endParsed = parseTimeInputToSeconds(clipEnd);
-    const fullDuration = formatSecondsToClock(duration);
-
-    if (startParsed.seconds === null || startParsed.error || startParsed.seconds >= duration) {
-      setClipStart("00:00:00");
-    }
-
-    if (
-      endParsed.seconds === null ||
-      endParsed.error ||
-      endParsed.seconds > duration ||
-      (startParsed.seconds !== null && !startParsed.error && endParsed.seconds !== null && endParsed.seconds <= startParsed.seconds)
-    ) {
-      setClipEnd(fullDuration);
-    }
-  }, [clipEnabled, clipEnd, clipStart, videoInfo]);
-
-  const getBrowserLabel = useCallback((value) => {
-    const found = COOKIE_BROWSER_OPTIONS.find((item) => item.value === value);
-    return found ? found.label : value;
-  }, []);
-  const getFileName = useCallback((filePath) => {
-    const value = String(filePath || "");
-    if (!value) return "";
-    const parts = value.split(/[\\/]/);
-    return parts[parts.length - 1] || value;
-  }, []);
-
-  const handleRetryFetchWithCookies = async () => {
-    if (!hasElectron || !cookiePrompt.open) return;
-    const isDownloadRetry = cookiePrompt.source === "download" && cookiePrompt.jobId;
-
-    if (isDownloadRetry) {
-      setCookieRetrying(true);
-      setErrorMessage("");
-      try {
-        const response = await window.electronAPI.resumeDownload({
-          jobId: cookiePrompt.jobId,
-          cookieBrowser
-        });
-        if (!response?.success) {
-          throw new Error(response?.message || "Unable to retry download with browser cookies.");
-        }
-        setActiveCookieBrowser(cookieBrowser);
-        setActiveCookiesFile("");
-        setCookiesFilePath("");
-        setCookiePrompt((prev) => ({ ...prev, open: false, jobId: "", source: "fetch" }));
-        setSelectedJobId(cookiePrompt.jobId);
-        pushToast({
-          type: "success",
-          title: "Retry Queued",
-          message: `Retrying download with ${getBrowserLabel(cookieBrowser)} cookies.`
-        });
-      } catch (error) {
-        setErrorMessage(error.message || "Unable to retry download with browser cookies.");
-        pushToast({
-          type: "error",
-          title: "Cookie Retry Failed",
-          message: error.message || "Unable to retry download with browser cookies."
-        });
-      } finally {
-        setCookieRetrying(false);
-      }
-      return;
-    }
-
-    if (!cookiePrompt.url) return;
-    setCookieRetrying(true);
-    setFetchingInfo(true);
-    setErrorMessage("");
-    setVideoInfo(null);
-
-    try {
-      const response = await window.electronAPI.fetchVideoInfo({
-        url: cookiePrompt.url,
-        cookieBrowser
-      });
-      if (!response?.ok && response?.reason === "browser_cookies_failed") {
-        setCookiePrompt((prev) => ({
+    window.electronAPI
+      .checkAppUpdate()
+      .then((response) => {
+        if (disposed) return;
+        setAppUpdateState((prev) => ({
           ...prev,
-          message: response.message || "Could not read browser cookies.",
-          detail: response.detail || "",
-          canUseCookiesFile: true
+          checked: true,
+          currentVersion: String(response.currentVersion || ""),
+          latestVersion: String(response.latestVersion || ""),
+          latestTag: String(response.latestTag || ""),
+          releaseUrl: String(response.releaseUrl || ""),
+          updateAvailable: Boolean(response.updateAvailable),
+          dismissed: Boolean(response.updateAvailable) ? prev.dismissed : false,
+          error: ""
         }));
-        pushToast({
-          type: "warn",
-          title: "Browser Cookie Access Failed",
-          message: "Close the browser fully and retry, or pick an exported cookies.txt file."
-        });
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setAppUpdateState((prev) => ({ ...prev, checked: true, error: error.message || "App update check failed." }));
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [hasElectron]);
+
+  const openExternal = useCallback(
+    async (target) => {
+      if (hasElectron && window.electronAPI?.openExternal) {
+        await window.electronAPI.openExternal(target);
         return;
       }
-      if (!response?.ok || !response?.data) {
-        if (response?.reason === "no_formats_available") {
-          showFormatExtractionError(response?.detail || response?.message || "");
-          return;
-        }
-        throw new Error(response?.message || "Unable to fetch metadata.");
-      }
-      const info = response.data;
-      setVideoInfo(info);
-      setSelectedFormatId("auto");
-      setActiveCookieBrowser(cookieBrowser);
-      setActiveCookiesFile("");
-      setCookiesFilePath("");
-      setCookiePrompt((prev) => ({ ...prev, open: false, source: "fetch", jobId: "" }));
-      if (!Array.isArray(info.formats) || info.formats.length === 0) {
-        showFormatExtractionError();
-      }
-      pushToast({
-        type: "success",
-        title: "Metadata Loaded",
-        message: `Using ${getBrowserLabel(cookieBrowser)} cookies.`
-      });
-    } catch (error) {
-      setErrorMessage(error.message || "Unable to fetch metadata with cookies.");
-      pushToast({
-        type: "error",
-        title: "Cookie Retry Failed",
-        message: error.message || "Unable to fetch metadata with cookies."
-      });
-    } finally {
-      setCookieRetrying(false);
-      setFetchingInfo(false);
-    }
-  };
+      window.open(target, "_blank", "noopener,noreferrer");
+    },
+    [hasElectron]
+  );
 
-  const handleChooseCookiesFile = async () => {
-    if (!hasElectron || !window.electronAPI?.chooseCookiesFile) return;
-    const selected = await window.electronAPI.chooseCookiesFile();
-    if (selected) {
-      setCookiesFilePath(selected);
-    }
-  };
-
-  const handleRetryFetchWithCookiesFile = async () => {
-    if (!hasElectron || !cookiePrompt.open) return;
-    if (!cookiesFilePath) {
-      setErrorMessage("Select a cookies.txt file first.");
-      return;
-    }
-
-    const isDownloadRetry = cookiePrompt.source === "download" && cookiePrompt.jobId;
-    if (isDownloadRetry) {
-      setCookieFileRetrying(true);
-      setErrorMessage("");
-      try {
-        const response = await window.electronAPI.resumeDownload({
-          jobId: cookiePrompt.jobId,
-          cookiesFile: cookiesFilePath
-        });
-        if (!response?.success) {
-          throw new Error(response?.message || "Unable to retry download with cookies file.");
-        }
-        setActiveCookiesFile(cookiesFilePath);
-        setActiveCookieBrowser("");
-        setCookiePrompt((prev) => ({ ...prev, open: false, jobId: "", source: "fetch" }));
-        setSelectedJobId(cookiePrompt.jobId);
-        pushToast({
-          type: "success",
-          title: "Retry Queued",
-          message: `Retrying download with ${getFileName(cookiesFilePath)}.`
-        });
-      } catch (error) {
-        setErrorMessage(error.message || "Unable to retry download with cookies file.");
-        pushToast({
-          type: "error",
-          title: "Cookies File Retry Failed",
-          message: error.message || "Unable to retry download with cookies file."
-        });
-      } finally {
-        setCookieFileRetrying(false);
-      }
-      return;
-    }
-
-    if (!cookiePrompt.url) return;
-    setCookieFileRetrying(true);
-    setFetchingInfo(true);
-    setErrorMessage("");
-    setVideoInfo(null);
-
-    try {
-      const response = await window.electronAPI.fetchVideoInfo({
-        url: cookiePrompt.url,
-        cookiesFile: cookiesFilePath
-      });
-      if (!response?.ok || !response?.data) {
-        if (response?.reason === "no_formats_available") {
-          showFormatExtractionError(response?.detail || response?.message || "");
-          return;
-        }
-        throw new Error(response?.message || "Unable to fetch metadata with cookies file.");
-      }
-      const info = response.data;
-      setVideoInfo(info);
-      setSelectedFormatId("auto");
-      setActiveCookiesFile(cookiesFilePath);
-      setActiveCookieBrowser("");
-      setCookiePrompt((prev) => ({ ...prev, open: false, source: "fetch", jobId: "" }));
-      if (!Array.isArray(info.formats) || info.formats.length === 0) {
-        showFormatExtractionError();
-      }
-      pushToast({
-        type: "success",
-        title: "Metadata Loaded",
-        message: `Using ${getFileName(cookiesFilePath)}.`
-      });
-    } catch (error) {
-      setErrorMessage(error.message || "Unable to fetch metadata with cookies file.");
-      pushToast({
-        type: "error",
-        title: "Cookies File Retry Failed",
-        message: error.message || "Unable to fetch metadata with cookies file."
-      });
-    } finally {
-      setCookieFileRetrying(false);
-      setFetchingInfo(false);
-    }
-  };
-
-  const handleChooseFolder = async () => {
-    if (!hasElectron) return;
-    const folder = await window.electronAPI.chooseDownloadFolder();
-    if (folder) setDownloadFolder(folder);
-  };
-
-  const handleQueueDownload = async () => {
-    if (!hasElectron) return;
-    setErrorMessage("");
-
-    try {
-      if (clipEnabled && !clipRangeState.valid) {
-        throw new Error(clipRangeState.error || "Clip range is invalid.");
-      }
-
-      const result = await window.electronAPI.downloadVideo({
-        url: url.trim(),
-        title: videoInfo?.title || url.trim(),
-        thumbnail: videoInfo?.thumbnail || "",
-        outputFolder: downloadFolder,
-        mode,
-        quality,
-        selectedFormatId,
-        cookieBrowser: activeCookieBrowser,
-        cookiesFile: activeCookiesFile,
-        allowPlaylist: Boolean(videoInfo?.isPlaylist),
-        playlistCount: videoInfo?.playlistCount || 0,
-        clipEnabled: Boolean(clipEnabled),
-        clipStart: clipRangeState.normalizedStart,
-        clipEnd: clipRangeState.normalizedEnd,
-        sourceDurationSeconds: Number(videoInfo?.duration || 0) || null,
-        concurrentFragments
-      });
-      setSelectedJobId(result.jobId);
-      pushToast({ type: "success", title: "Queued", message: "Download added to queue." });
-    } catch (error) {
-      setErrorMessage(error.message || "Unable to queue download.");
-      pushToast({ type: "error", title: "Queue Failed", message: error.message || "Unable to queue download." });
-    }
-  };
-
-  const handlePause = async (jobId) => {
-    if (!hasElectron) return;
-    const response = await window.electronAPI.pauseDownload(jobId);
-    if (!response.success) {
-      pushToast({ type: "error", title: "Pause Failed", message: response.message || "Unable to pause." });
-    }
-  };
-
-  const handleResume = async (jobId) => {
-    if (!hasElectron) return;
-    const response = await window.electronAPI.resumeDownload(jobId);
-    if (!response.success) {
-      pushToast({ type: "error", title: "Resume Failed", message: response.message || "Unable to resume." });
-    }
-  };
-
-  const handleCancel = async (jobId) => {
-    if (!hasElectron) return;
-    const response = await window.electronAPI.cancelDownload(jobId);
-    if (!response.success) {
-      pushToast({ type: "error", title: "Cancel Failed", message: response.message || "Unable to cancel." });
-    }
-  };
-
-  const checkYtDlpUpdate = async () => {
+  const checkYtDlpUpdate = useCallback(async () => {
     if (!hasElectron) return;
     setYtDlpState((prev) => ({ ...prev, checking: true, output: "" }));
     try {
@@ -891,9 +181,9 @@ function App() {
     } catch (error) {
       setYtDlpState((prev) => ({ ...prev, checking: false, output: error.message || "Update check failed." }));
     }
-  };
+  }, [hasElectron]);
 
-  const runYtDlpUpdate = async () => {
+  const runYtDlpUpdate = useCallback(async () => {
     if (!hasElectron) return;
     setYtDlpState((prev) => ({ ...prev, updating: true }));
     try {
@@ -913,610 +203,172 @@ function App() {
     } catch (error) {
       setYtDlpState((prev) => ({ ...prev, updating: false, output: error.message || "Update failed." }));
     }
-  };
+  }, [hasElectron, pushToast]);
 
-  const clearFinished = async () => {
-    if (!hasElectron) return;
-    await window.electronAPI.clearFinished();
-  };
+  const viewMeta = useMemo(() => {
+    if (currentView === "active-queue") return `${jobsApi.activeJobs.length} active · ${jobsApi.runningJobId ? "engine live" : "idle"}`;
+    if (currentView === "history") return `${jobsApi.historyJobs.length} archived jobs`;
+    if (currentView === "settings") return "Persistent defaults and maintenance";
+    return workspace.videoInfo ? "Metadata ready to queue" : "Paste a link to begin";
+  }, [currentView, jobsApi.activeJobs.length, jobsApi.historyJobs.length, jobsApi.runningJobId, workspace.videoInfo]);
 
-  const handleOpenRepo = async () => {
-    if (hasElectron && window.electronAPI?.openExternal) {
-      await window.electronAPI.openExternal(PROJECT_REPO_URL);
-      return;
+  const handleSaveSettings = useCallback(async () => {
+    const previous = preferences;
+    const response = await updatePreferences(settingsDraft, { optimistic: false });
+    if (!response.success) return;
+
+    const nextSettings = response.settings || settingsDraft;
+    setSettingsDraft(nextSettings);
+
+    if (!workspace.downloadFolder || workspace.downloadFolder === previous.defaultOutputFolder) {
+      workspace.setDownloadFolder(nextSettings.defaultOutputFolder || "");
     }
-    window.open(PROJECT_REPO_URL, "_blank", "noopener,noreferrer");
-  };
-
-  const handleOpenCookieGuide = async () => {
-    if (hasElectron && window.electronAPI?.openExternal) {
-      await window.electronAPI.openExternal(YTDLP_COOKIE_EXPORT_GUIDE_URL);
-      return;
+    if (workspace.mode === previous.defaultMode) {
+      workspace.setMode(nextSettings.defaultMode || "video");
     }
-    window.open(YTDLP_COOKIE_EXPORT_GUIDE_URL, "_blank", "noopener,noreferrer");
-  };
-
-  const handleOpenCookieExtension = async () => {
-    if (hasElectron && window.electronAPI?.openExternal) {
-      await window.electronAPI.openExternal(RECOMMENDED_COOKIE_EXTENSION_URL);
-      return;
+    if (workspace.quality === previous.defaultQuality) {
+      workspace.setQuality(nextSettings.defaultQuality || "best");
     }
-    window.open(RECOMMENDED_COOKIE_EXTENSION_URL, "_blank", "noopener,noreferrer");
-  };
+    if (Number(workspace.concurrentFragments) === Number(previous.defaultConcurrentFragments || 1)) {
+      workspace.setConcurrentFragments(Number(nextSettings.defaultConcurrentFragments || 1));
+    }
+
+    pushToast({
+      type: "success",
+      title: "Preferences Saved",
+      message: "Workspace defaults have been updated."
+    });
+  }, [preferences, pushToast, settingsDraft, updatePreferences, workspace]);
 
   return (
-    <div className="h-screen bg-app-bg p-3 md:p-4">
-      <div className="mx-auto flex h-full max-w-[1600px] flex-col overflow-hidden rounded-3xl border border-app-border bg-app-bg">
-        <header
-          className="flex h-16 items-center justify-between border-b border-app-border bg-app-bg px-4 md:px-6"
-          style={{ WebkitAppRegion: "drag" }}
-        >
-          <div>
-            <h1 className="font-display text-xl font-bold text-app-text">StreamFetch</h1>
-            <p className="mt-0.5 text-xs text-app-muted">{runningJobId ? "Running" : "Idle"} | {activeJobs.length} active</p>
-          </div>
+    <>
+      <AppShell
+        currentView={currentView}
+        setCurrentView={setCurrentView}
+        viewItems={VIEW_ITEMS}
+        viewMeta={viewMeta}
+        runningJobId={jobsApi.runningJobId}
+        counts={{ active: jobsApi.activeJobs.length, history: jobsApi.historyJobs.length }}
+        hasElectron={hasElectron}
+        theme={preferences.theme}
+        onThemeToggle={() => updatePreferences({ theme: preferences.theme === "dark" ? "light" : "dark" })}
+        onOpenRepo={() => openExternal(PROJECT_REPO_URL)}
+        onMinimize={() => hasElectron && window.electronAPI.windowMinimize()}
+        onToggleMaximize={async () => {
+          if (!hasElectron) return;
+          const state = await window.electronAPI.windowToggleMaximize();
+          setMaximized(Boolean(state));
+        }}
+        onClose={() => hasElectron && window.electronAPI.windowClose()}
+        maximized={maximized}
+      >
+        {currentView === "new-download" && (
+          <NewDownloadView
+            hasElectron={hasElectron}
+            appUpdateState={appUpdateState}
+            onOpenAppUpdate={() => openExternal(appUpdateState.releaseUrl || "https://github.com/Shripad735/streamfetch/releases/latest")}
+            url={workspace.url}
+            setUrl={workspace.setUrl}
+            fetchingInfo={workspace.fetchingInfo}
+            onFetchInfo={() => workspace.fetchInfoForUrl(workspace.url)}
+            clipboardWatcherEnabled={preferences.clipboardWatcherEnabled}
+            onToggleClipboardWatcher={() => updatePreferences({ clipboardWatcherEnabled: !preferences.clipboardWatcherEnabled })}
+            videoInfo={workspace.videoInfo}
+            mode={workspace.mode}
+            setMode={workspace.setMode}
+            quality={workspace.quality}
+            setQuality={workspace.setQuality}
+            selectedFormatId={workspace.selectedFormatId}
+            setSelectedFormatId={workspace.setSelectedFormatId}
+            muxedFormats={workspace.muxedFormats}
+            clipEnabled={workspace.clipEnabled}
+            setClipEnabled={workspace.setClipEnabled}
+            clipStart={workspace.clipStart}
+            setClipStart={workspace.setClipStart}
+            clipEnd={workspace.clipEnd}
+            setClipEnd={workspace.setClipEnd}
+            clipRangeState={workspace.clipRangeState}
+            concurrentFragments={workspace.concurrentFragments}
+            setConcurrentFragments={workspace.setConcurrentFragments}
+            downloadFolder={workspace.downloadFolder}
+            onChooseFolder={workspace.chooseDownloadFolder}
+            onQueueDownload={workspace.queueDownload}
+            errorMessage={workspace.errorMessage}
+            ytDlpState={ytDlpState}
+            onCheckYtDlpUpdate={checkYtDlpUpdate}
+            onRunYtDlpUpdate={runYtDlpUpdate}
+            activeCookieBrowser={workspace.activeCookieBrowser}
+            activeCookiesFile={workspace.activeCookiesFile}
+          />
+        )}
+        {currentView === "active-queue" && (
+          <QueueView
+            jobs={jobsApi.jobs}
+            activeJobs={jobsApi.activeJobs}
+            selectedJob={jobsApi.selectedJob}
+            selectedJobId={jobsApi.selectedJobId}
+            setSelectedJobId={jobsApi.setSelectedJobId}
+            onPause={jobsApi.pauseJob}
+            onResume={jobsApi.resumeJob}
+            onCancel={jobsApi.cancelJob}
+            onClearFinished={jobsApi.clearFinished}
+          />
+        )}
+        {currentView === "history" && (
+          <HistoryView
+            historyJobs={jobsApi.historyJobs}
+            historyQuery={historyQuery}
+            setHistoryQuery={setHistoryQuery}
+            onClear={jobsApi.clearFinished}
+            onSelect={(jobId) => {
+              jobsApi.setSelectedJobId(jobId);
+              setCurrentView("active-queue");
+            }}
+            selectedJobId={jobsApi.selectedJobId}
+          />
+        )}
+        {currentView === "settings" && (
+          <SettingsView
+            preferences={preferences}
+            settingsDraft={settingsDraft}
+            setSettingsDraft={setSettingsDraft}
+            onSave={handleSaveSettings}
+            onChooseDefaultFolder={async () => {
+              if (!hasElectron) return;
+              const folder = await window.electronAPI.chooseDownloadFolder();
+              if (folder) setSettingsDraft((prev) => ({ ...prev, defaultOutputFolder: folder }));
+            }}
+            onToggleClipboard={() => updatePreferences({ clipboardWatcherEnabled: !preferences.clipboardWatcherEnabled })}
+            ytDlpState={ytDlpState}
+            onCheckYtDlpUpdate={checkYtDlpUpdate}
+            onRunYtDlpUpdate={runYtDlpUpdate}
+            appUpdateState={appUpdateState}
+            onOpenAppUpdate={() => openExternal(appUpdateState.releaseUrl || "https://github.com/Shripad735/streamfetch/releases/latest")}
+            onOpenRepo={() => openExternal(PROJECT_REPO_URL)}
+            hasElectron={hasElectron}
+          />
+        )}
+      </AppShell>
 
-          <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" }}>
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-card text-app-muted transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
-              onClick={handleOpenRepo}
-              title="Open source on GitHub"
-              aria-label="Open StreamFetch GitHub repository"
-            >
-              <svg viewBox="0 0 16 16" className="h-4 w-4" fill="currentColor" aria-hidden="true">
-                <path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.22 2.2.82a7.5 7.5 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-card text-app-muted transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
-              onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            >
-              {theme === "dark" ? (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                  <circle cx="12" cy="12" r="4.2" />
-                  <path d="M12 2.5v2.1M12 19.4v2.1M4.6 4.6l1.5 1.5M17.9 17.9l1.5 1.5M2.5 12h2.1M19.4 12h2.1M4.6 19.4l1.5-1.5M17.9 6.1l1.5-1.5" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-                  <path d="M21 12.7A9 9 0 1 1 11.3 3a7.3 7.3 0 0 0 9.7 9.7z" />
-                </svg>
-              )}
-            </button>
-            <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-card text-xs text-app-muted transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
-              onClick={() => hasElectron && window.electronAPI.windowMinimize()}
-            >
-              -
-            </button>
-            <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-card text-xs text-app-muted transition-colors duration-200 hover:border-app-accent/40 hover:text-app-accent"
-              onClick={async () => {
-                if (!hasElectron) return;
-                const state = await window.electronAPI.windowToggleMaximize();
-                setMaximized(Boolean(state));
-              }}
-            >
-              {maximized ? "o" : "+"}
-            </button>
-            <button
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-app-border bg-app-card text-xs text-app-muted transition-colors duration-200 hover:border-app-dangerBorder hover:bg-app-dangerBg hover:text-app-dangerText"
-              onClick={() => hasElectron && window.electronAPI.windowClose()}
-            >
-              x
-            </button>
-          </div>
-        </header>
-
-        <main className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 p-4 xl:grid-cols-[1.28fr_1fr]">
-          <Card className="min-h-0 min-w-0 overflow-hidden p-4 md:p-5">
-            <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&>*]:shrink-0 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-              {!hasElectron && (
-                <div className="rounded-2xl border border-app-dangerBorder bg-app-dangerBg px-4 py-3 text-sm text-app-dangerText">
-                  Electron bridge unavailable. Run inside desktop app.
-                </div>
-              )}
-
-              {hasElectron && appUpdateState.updateAvailable && !appUpdateState.dismissed && (
-                <Card className="border-app-accent/25 bg-app-panel p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="font-display text-sm font-semibold text-app-text">
-                        App Update Available ({appUpdateState.latestTag || appUpdateState.latestVersion || "latest"})
-                      </h3>
-                      <p className="mt-1 text-xs text-app-muted">
-                        Installed: {appUpdateState.currentVersion || "--"} | Latest:{" "}
-                        {appUpdateState.latestVersion || appUpdateState.latestTag || "--"}
-                      </p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="secondary" onClick={handleOpenAppUpdate}>
-                        Download Update
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setAppUpdateState((prev) => ({ ...prev, dismissed: true }))}
-                      >
-                        Later
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              )}
-
-              <Card className="p-4 md:p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                  <Input
-                    className="flex-1"
-                    label="Video URL"
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    placeholder="Paste video URL here..."
-                  />
-                  <Button variant="primary" size="lg" onClick={handleFetchInfo} disabled={!url.trim() || fetchingInfo}>
-                    {fetchingInfo ? "Fetching..." : "Fetch"}
-                  </Button>
-                </div>
-              </Card>
-
-              <Card className="border-app-border/70 bg-app-panel/75 p-4 md:p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="font-display text-sm font-semibold text-app-text">Smart Clipboard Watcher</p>
-                    <p className="mt-1 text-sm leading-6 text-app-muted">
-                      Watch copied YouTube links and show a one-click in-app fetch prompt while StreamFetch is visible.
-                    </p>
-                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-app-muted">
-                      Status: {clipboardWatcherEnabled ? "Enabled" : "Disabled"}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={clipboardWatcherEnabled ? "primary" : "secondary"}
-                    onClick={handleClipboardWatcherToggle}
-                    disabled={!hasElectron}
-                  >
-                    {clipboardWatcherEnabled ? "Turn Off" : "Turn On"}
-                  </Button>
-                </div>
-              </Card>
-
-              {fetchingInfo && <VideoInfoSkeleton />}
-              {!fetchingInfo && videoInfo && (
-                <VideoInfoCard
-                  title={videoInfo.title}
-                  thumbnail={videoInfo.thumbnail}
-                  extractor={videoInfo.extractor}
-                  duration={formatDuration(videoInfo.duration)}
-                  isPlaylist={videoInfo.isPlaylist}
-                  playlistCount={videoInfo.playlistCount}
-                />
-              )}
-
-              <Card className="p-4 md:p-5">
-                <h3 className="mb-3 font-display text-sm font-semibold text-app-text">Download Options</h3>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <Input as="select" value={mode} onChange={(event) => setMode(event.target.value)} label="Format Type">
-                    <option value="video">Video MP4</option>
-                    <option value="audio">Audio MP3</option>
-                  </Input>
-
-                  <Input
-                    as="select"
-                    value={quality}
-                    onChange={(event) => setQuality(event.target.value)}
-                    disabled={mode === "audio"}
-                    label="Quality"
-                  >
-                    {QUALITY_OPTIONS.map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </Input>
-
-                  <Input
-                    as="select"
-                    value={selectedFormatId}
-                    onChange={(event) => setSelectedFormatId(event.target.value)}
-                    disabled={mode === "audio"}
-                    label="Advanced Format Picker"
-                  >
-                    <option value="auto">Auto (Smart)</option>
-                    {muxedFormats.map((item) => (
-                      <option key={item.formatId} value={item.formatId}>
-                        {formatFormatOption(item)}
-                      </option>
-                    ))}
-                  </Input>
-                </div>
-
-                <div className="mt-4 rounded-[30px] bg-app-panel/72 p-5 shadow-card ring-1 ring-app-border/35">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-display text-base font-semibold tracking-[0.01em] text-app-text">Clip Range (Optional)</p>
-                      <p className="mt-1 text-sm leading-6 text-app-muted">
-                        Download only a part of the video using start and end times.
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={clipEnabled ? "primary" : "secondary"}
-                      disabled={Boolean(videoInfo?.isPlaylist)}
-                      onClick={() => {
-                        setClipEnabled((prev) => {
-                          const next = !prev;
-                          if (!next) {
-                            setClipStart("");
-                            setClipEnd("");
-                          } else {
-                            const duration = Number(videoInfo?.duration || 0) || 0;
-                            setClipStart("00:00:00");
-                            setClipEnd(duration ? formatSecondsToClock(duration) : "");
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      {clipEnabled ? "Range On" : "Range Off"}
-                    </Button>
-                  </div>
-
-                  {videoInfo?.isPlaylist && (
-                    <p className="mt-2 text-xs text-app-muted">Clip range is available only for single videos.</p>
-                  )}
-
-                  {clipEnabled && !videoInfo?.isPlaylist && (
-                    <div className="mt-4">
-                      <ClipStudio
-                        durationSeconds={videoInfo?.duration || 0}
-                        thumbnail={videoInfo?.thumbnail || ""}
-                        startValue={clipStart}
-                        endValue={clipEnd}
-                        onStartChange={setClipStart}
-                        onEndChange={setClipEnd}
-                        disabled={!videoInfo?.duration}
-                      />
-                      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-                        <Input
-                          className="min-w-0"
-                          label="Start Time"
-                          value={clipStart}
-                          onChange={(event) => setClipStart(event.target.value)}
-                          placeholder="00:00:00"
-                          inputClassName="bg-app-card/70"
-                        />
-                        <Input
-                          className="min-w-0"
-                          label="End Time"
-                          value={clipEnd}
-                          onChange={(event) => setClipEnd(event.target.value)}
-                          placeholder={videoInfo?.duration ? formatSecondsToClock(videoInfo.duration) : "00:30"}
-                          inputClassName="bg-app-card/70"
-                        />
-                      </div>
-                      <p className="mt-3 text-sm leading-6 text-app-muted">
-                        Drag the Clip Studio handles first, then fine-tune here if needed. You can use `ss`, `mm:ss`, or `hh:mm:ss`.
-                      </p>
-                      {clipRangeState.valid ? (
-                        clipRangeState.normalizedStart && clipRangeState.normalizedEnd ? (
-                          <p className="mt-2 text-sm font-medium text-app-accent">
-                            Clip: {clipRangeState.normalizedStart} to {clipRangeState.normalizedEnd}
-                            {clipRangeState.durationSeconds !== null
-                              ? ` (${formatDuration(clipRangeState.durationSeconds)})`
-                              : ""}
-                          </p>
-                        ) : null
-                      ) : (
-                        <p className="mt-2 text-xs text-app-dangerText">{clipRangeState.error}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 rounded-[30px] border border-app-border/45 bg-app-panel/78 p-4 shadow-card sm:p-5">
-                  <div className="flex flex-col gap-5">
-                    <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
-                      <p className="font-display text-base font-semibold tracking-[0.01em] text-app-text">Download Acceleration</p>
-                      <div className="inline-flex rounded-[18px] border border-app-border/60 bg-app-bg/55 p-1 shadow-inner">
-                        <button
-                          type="button"
-                          className={[
-                            "min-w-[96px] rounded-[14px] px-4 py-2 text-sm font-semibold transition-all duration-200",
-                            turboEnabled ? "text-app-muted hover:text-app-text" : "bg-app-card text-app-text shadow-card"
-                          ].join(" ")}
-                          onClick={() => setConcurrentFragments(1)}
-                          aria-pressed={!turboEnabled}
-                        >
-                          Turbo Off
-                        </button>
-                        <button
-                          type="button"
-                          className={[
-                            "min-w-[96px] rounded-[14px] px-4 py-2 text-sm font-semibold transition-all duration-200",
-                            turboEnabled
-                              ? "bg-gradient-to-r from-app-accentSoft to-app-accent text-white shadow-button"
-                              : "text-app-muted hover:text-app-text"
-                          ].join(" ")}
-                          onClick={() => setConcurrentFragments((prev) => (prev > 1 ? prev : 8))}
-                          aria-pressed={turboEnabled}
-                        >
-                          Turbo On
-                        </button>
-                      </div>
-                    </div>
-
-                    <p className="max-w-3xl text-sm leading-6 text-app-muted">
-                      Turbo Mode uses yt-dlp concurrent fragments on compatible streams. Some sources may show little or no speed change.
-                    </p>
-
-                    <div className="rounded-[24px] border border-app-border/35 bg-app-card/50 p-4">
-                      <div className="flex flex-col gap-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-app-muted">Fragment Count</p>
-                          <div className={turboEnabled ? "w-full sm:w-[220px]" : "w-full sm:w-[220px] opacity-60 saturate-0"}>
-                            <Input
-                              as="select"
-                              value={String(concurrentFragments)}
-                              onChange={(event) => setConcurrentFragments(Number(event.target.value))}
-                              inputClassName="h-11 border-app-border/40 bg-app-bg/42 shadow-none focus:border-app-accent/35"
-                            >
-                              {CONCURRENT_FRAGMENT_OPTIONS.map((item) => (
-                                <option key={item} value={item}>
-                                  {item === 1 ? "1 fragment (Standard)" : `${item} fragments`}
-                                </option>
-                              ))}
-                            </Input>
-                          </div>
-                          {turboEnabled && (
-                            <Badge variant="info" className="px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
-                              Turbo x{concurrentFragments}
-                            </Badge>
-                          )}
-                        </div>
-
-                        <p className="text-xs leading-5 text-app-muted">
-                          {turboEnabled
-                            ? "Hint: Higher fragment counts can improve throughput on compatible streams."
-                            : "Hint: Turn Turbo on to activate multi-fragment downloading."}
-                        </p>
-                        <p className="text-xs leading-5 text-app-muted">
-                          Status: {accelerationStatusText}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="p-4 md:p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                  <Input className="flex-1" label="Download Folder" value={downloadFolder} readOnly placeholder="Choose a folder..." />
-                  <Button
-                    variant="secondary"
-                    className="h-12 w-12 rounded-2xl p-0"
-                    onClick={handleChooseFolder}
-                    aria-label="Select folder"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9">
-                      <path d="M3.75 6.75h5l2 2h9.5v8.5a2 2 0 0 1-2 2h-12.5a2 2 0 0 1-2-2v-10.5z" />
-                    </svg>
-                  </Button>
-                </div>
-              </Card>
-
-              <Button
-                variant="primary"
-                size="lg"
-                className="h-14 w-full text-base"
-                onClick={handleQueueDownload}
-                disabled={!url.trim() || !downloadFolder || (clipEnabled && !clipRangeState.valid)}
-              >
-                Add To Queue
-              </Button>
-
-              <Card className="p-4 md:p-5">
-                <h3 className="font-display text-sm font-semibold text-app-text">yt-dlp Updater</h3>
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-app-muted">
-                  <span>Current: {ytDlpState.currentVersion || "--"}</span>
-                  <span>Latest: {ytDlpState.latestVersion || "--"}</span>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button variant="secondary" onClick={checkYtDlpUpdate} disabled={ytDlpState.checking}>
-                    {ytDlpState.checking ? "Checking..." : "Check Updates"}
-                  </Button>
-                  <Button variant="secondary" onClick={runYtDlpUpdate} disabled={ytDlpState.updating}>
-                    {ytDlpState.updating ? "Updating..." : "One-Click Update"}
-                  </Button>
-                </div>
-                {ytDlpState.output && (
-                  <pre className="mt-3 max-h-28 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 text-xs text-app-text [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-                    {ytDlpState.output}
-                  </pre>
-                )}
-              </Card>
-
-              {errorMessage && (
-                <div className="rounded-2xl border border-app-dangerBorder bg-app-dangerBg px-4 py-3 text-sm text-app-dangerText">
-                  {errorMessage}
-                </div>
-              )}
-            </div>
-          </Card>
-
-          <section className="grid min-h-0 min-w-0 grid-rows-[1fr_auto] gap-4 xl:grid-rows-[1fr_0.95fr]">
-            <Card className="flex min-h-0 min-w-0 flex-col p-4">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="font-display text-sm font-semibold text-app-text">Per-Item Progress</h3>
-                <Button size="sm" variant="ghost" onClick={clearFinished}>
-                  Clear Finished
-                </Button>
-              </div>
-
-              <div className="min-h-0 space-y-3 overflow-auto pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-                {jobs.length === 0 && <p className="text-sm text-app-muted">Queue is empty.</p>}
-                {jobs.slice(0, 30).map((job) => (
-                  <DownloadCard
-                    key={job.id}
-                    job={job}
-                    selected={selectedJobId === job.id}
-                    onSelect={setSelectedJobId}
-                    onPause={handlePause}
-                    onResume={handleResume}
-                    onCancel={handleCancel}
-                  />
-                ))}
-              </div>
-            </Card>
-
-            <div className="grid min-h-0 min-w-0 gap-4 lg:grid-cols-[1.35fr_1fr]">
-              <LogPanel title={selectedJob ? `Logs | ${selectedJob.title}` : "Logs"} lines={selectedJob?.logs || []} />
-              <HistoryList entries={historyJobs} onClear={clearFinished} onSelect={setSelectedJobId} />
-            </div>
-          </section>
-        </main>
-      </div>
-
-      {noFormatsPrompt.open && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4">
-          <Card className="w-full max-w-lg p-5">
-            <h3 className="font-display text-base font-semibold text-app-text">{noFormatsPrompt.title}</h3>
-            <p className="mt-2 whitespace-pre-line text-sm text-app-muted">{noFormatsPrompt.message}</p>
-            <p className="mt-2 text-xs text-app-muted">
-              This usually means the app could not extract a usable format list from YouTube yet. Authentication or a retry can still help.
-            </p>
-            {noFormatsPrompt.detail && (
-              <pre className="mt-3 max-h-32 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 text-xs text-app-muted [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-                {noFormatsPrompt.detail}
-              </pre>
-            )}
-            <div className="mt-4 flex justify-end">
-              <Button variant="primary" onClick={closeNoFormatsPrompt}>
-                OK
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {cookiePrompt.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
-          <Card className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden p-5">
-            <h3 className="font-display text-base font-semibold text-app-text">Authentication Required</h3>
-            <div className="mt-2 overflow-y-auto pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-              <p className="text-sm text-app-muted">
-                {cookiePrompt.message ||
-                  "This video needs a signed-in browser session. Choose a browser and retry metadata fetch."}
-              </p>
-              {cookiePrompt.detail && (
-                <pre className="mt-3 max-h-24 overflow-auto rounded-2xl border border-app-border bg-app-panel p-3 text-xs text-app-muted [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
-                  {cookiePrompt.detail}
-                </pre>
-              )}
-              <div className="mt-4">
-                <Input
-                  as="select"
-                  label="Browser Cookies"
-                  value={cookieBrowser}
-                  onChange={(event) => setCookieBrowser(event.target.value)}
-                >
-                  {COOKIE_BROWSER_OPTIONS.filter((item) => cookiePrompt.supportedBrowsers.includes(item.value)).map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </Input>
-              </div>
-              {cookiePrompt.canUseCookiesFile && (
-                <div className="mt-4 rounded-2xl border border-app-border bg-app-panel p-3">
-                  <p className="text-xs text-app-muted">
-                    Browser cookie access failed. Export `cookies.txt` and retry with file import.
-                  </p>
-                  <details className="mt-3 rounded-2xl border border-app-border bg-app-card p-3">
-                    <summary className="cursor-pointer text-sm font-medium text-app-text">
-                      How to export `cookies.txt` (step by step)
-                    </summary>
-                    <ol className="mt-3 list-decimal space-y-2 pl-5 text-xs text-app-muted">
-                      <li>Open your browser and log in to YouTube.</li>
-                      <li>Install this extension (recommended): `Get cookies.txt LOCALLY`.</li>
-                      <li>Click `Open Recommended Extension`, then click `Add to Chrome`/`Add to Brave`.</li>
-                      <li>Open `youtube.com`, click the extension icon, then export cookies for YouTube.</li>
-                      <li>Save as `cookies.txt` (Netscape format).</li>
-                      <li>The file is usually in `Downloads` (example: `C:\\Users\\YourName\\Downloads`).</li>
-                      <li>In this popup, click the folder icon, select the file, then click `Retry With Cookies File`.</li>
-                    </ol>
-                    <div className="mt-3 flex flex-col gap-2">
-                      <Button className="w-full" variant="ghost" onClick={handleOpenCookieExtension}>
-                        Open Recommended Extension
-                      </Button>
-                      <Button className="w-full" variant="ghost" onClick={handleOpenCookieGuide}>
-                        Open Official Cookie Guide
-                      </Button>
-                    </div>
-                  </details>
-                  <div className="mt-3 flex items-end gap-2">
-                    <Input
-                      className="flex-1"
-                      label="Cookies File"
-                      value={cookiesFilePath}
-                      readOnly
-                      placeholder="Select cookies.txt..."
-                    />
-                    <Button
-                      variant="secondary"
-                      className="h-12 w-12 rounded-2xl p-0"
-                      onClick={handleChooseCookiesFile}
-                      aria-label="Select cookies file"
-                    >
-                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.9">
-                        <path d="M3.75 6.75h5l2 2h9.5v8.5a2 2 0 0 1-2 2h-12.5a2 2 0 0 1-2-2v-10.5z" />
-                      </svg>
-                    </Button>
-                  </div>
-                  <Button
-                    className="mt-3 w-full"
-                    variant="secondary"
-                    onClick={handleRetryFetchWithCookiesFile}
-                    disabled={!cookiesFilePath || cookieFileRetrying || cookieRetrying}
-                  >
-                    {cookieFileRetrying ? "Retrying With File..." : "Retry With Cookies File"}
-                  </Button>
-                </div>
-              )}
-            <div className="mt-4 flex justify-end gap-2">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setCookiePrompt((prev) => ({ ...prev, open: false, source: "fetch", jobId: "" }));
-                  setActiveCookieBrowser("");
-                  setActiveCookiesFile("");
-                  setCookiesFilePath("");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleRetryFetchWithCookies}
-                disabled={cookieRetrying || cookieFileRetrying}
-              >
-                {cookieRetrying ? "Retrying..." : "Retry With Cookies"}
-              </Button>
-            </div>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      <ToastStack
-        toasts={toasts}
-        onDismiss={dismissToast}
+      <NoFormatsDialog state={noFormatsPrompt} onClose={closeNoFormatsPrompt} />
+      <CookiePromptDialog
+        open={workspace.cookiePrompt.open}
+        cookiePrompt={workspace.cookiePrompt}
+        cookieBrowser={workspace.cookieBrowser}
+        setCookieBrowser={workspace.setCookieBrowser}
+        cookieBrowserOptions={COOKIE_BROWSER_OPTIONS}
+        cookiesFilePath={workspace.cookiesFilePath}
+        onChooseCookiesFile={workspace.chooseCookiesFile}
+        onRetryWithCookies={workspace.retryWithCookies}
+        onRetryWithCookiesFile={workspace.retryWithCookiesFile}
+        onOpenCookieExtension={() => openExternal(RECOMMENDED_COOKIE_EXTENSION_URL)}
+        onOpenCookieGuide={() => openExternal(YTDLP_COOKIE_EXPORT_GUIDE_URL)}
+        onClose={workspace.closeCookiePrompt}
+        cookieRetrying={workspace.cookieRetrying}
+        cookieFileRetrying={workspace.cookieFileRetrying}
       />
-    </div>
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+    </>
   );
 }
 

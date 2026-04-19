@@ -3,14 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --app-bg: 247 243 234;
+  --app-canvas: 236 239 244;
+  --app-bg: 248 249 251;
+  --app-sidebar: 243 245 248;
   --app-card: 255 255 255;
-  --app-accent: 0 122 255;
-  --app-accent-soft: 90 200 250;
-  --app-border: 229 231 235;
-  --app-text: 17 24 39;
-  --app-muted: 107 114 128;
-  --app-panel: 243 244 246;
+  --app-card-muted: 245 247 250;
+  --app-accent: 57 99 235;
+  --app-accent-strong: 38 75 204;
+  --app-accent-soft: 128 160 255;
+  --app-border: 225 229 236;
+  --app-border-strong: 205 212 223;
+  --app-text: 26 32 44;
+  --app-muted: 101 112 131;
+  --app-panel: 241 244 248;
   --app-danger-bg: 254 242 242;
   --app-danger-bg-hover: 254 226 226;
   --app-danger-border: 254 202 202;
@@ -30,14 +35,19 @@
 }
 
 html[data-theme="dark"] {
-  --app-bg: 12 16 24;
-  --app-card: 19 25 37;
-  --app-accent: 88 166 255;
-  --app-accent-soft: 40 146 255;
-  --app-border: 46 58 78;
+  --app-canvas: 11 15 23;
+  --app-bg: 16 21 32;
+  --app-sidebar: 18 24 36;
+  --app-card: 24 31 45;
+  --app-card-muted: 29 37 52;
+  --app-accent: 106 149 255;
+  --app-accent-strong: 135 171 255;
+  --app-accent-soft: 76 120 232;
+  --app-border: 45 57 78;
+  --app-border-strong: 69 84 110;
   --app-text: 230 238 252;
   --app-muted: 152 166 190;
-  --app-panel: 14 20 31;
+  --app-panel: 20 27 40;
   --app-danger-bg: 61 24 24;
   --app-danger-bg-hover: 78 31 31;
   --app-danger-border: 138 56 56;
@@ -69,5 +79,9 @@ html[data-theme="dark"] {
 
   body {
     @apply bg-app-bg font-body text-app-text antialiased;
+  }
+
+  ::selection {
+    @apply bg-app-accent/20;
   }
 }

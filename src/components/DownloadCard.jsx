@@ -3,27 +3,7 @@ import Button from "./ui/Button";
 import Card from "./ui/Card";
 import ProgressBar from "./ProgressBar";
 import { cn } from "../lib/cn";
-
-function statusLabel(status) {
-  switch (status) {
-    case "downloading":
-      return "Downloading";
-    case "queued":
-      return "Queued";
-    case "paused":
-      return "Paused";
-    case "retrying":
-      return "Retrying";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "canceled":
-      return "Canceled";
-    default:
-      return "Idle";
-  }
-}
+import { statusLabel } from "../lib/app-formatters";
 
 function DownloadCard({ job, selected, onSelect, onPause, onResume, onCancel }) {
   const progress = Math.max(0, Math.min(100, Number(job.progress || 0)));
@@ -48,8 +28,8 @@ function DownloadCard({ job, selected, onSelect, onPause, onResume, onCancel }) 
       as="article"
       onClick={() => onSelect(job.id)}
       className={cn(
-        "cursor-pointer p-4 transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-cardHover",
-        selected && "border-app-accent/40 ring-2 ring-app-accent/20"
+        "cursor-pointer p-4 transition-all duration-200 ease-out hover:border-app-borderStrong hover:bg-app-cardMuted",
+        selected && "border-app-accent/35 ring-2 ring-app-accent/15"
       )}
     >
       <header className="mb-2 flex items-start justify-between gap-3">

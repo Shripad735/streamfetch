@@ -1,23 +1,27 @@
 import Badge from "./ui/Badge";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
+import { cn } from "../lib/cn";
 
-function HistoryList({ entries, onClear, onSelect }) {
+function HistoryList({ entries, onClear, onSelect, selectedJobId = "" }) {
   return (
-    <Card as="section" className="flex min-h-0 min-w-0 flex-col p-4">
+    <Card as="section" className="flex min-h-0 min-w-0 flex-col p-0">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="font-display text-sm font-semibold text-app-text">History</h3>
+        <h3 className="px-4 pt-4 font-display text-sm font-semibold text-app-text">History</h3>
         <Button size="sm" variant="ghost" onClick={onClear} disabled={entries.length === 0}>
           Clear
         </Button>
       </div>
 
-      <div className="min-h-0 space-y-2 overflow-auto pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
+      <div className="min-h-0 space-y-2 overflow-auto px-4 pb-4 pr-1 [scrollbar-color:#CBD5E1_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300/70">
         {entries.length === 0 && <p className="text-sm text-app-muted">No completed downloads yet.</p>}
         {entries.map((item) => (
           <article
             key={item.id}
-            className="cursor-pointer rounded-2xl border border-app-border bg-app-bg p-3 transition-all duration-200 ease-out hover:border-app-accent/35 hover:bg-app-card"
+            className={cn(
+              "cursor-pointer rounded-2xl border border-app-border bg-app-bg p-3 transition-all duration-200 ease-out hover:border-app-borderStrong hover:bg-app-cardMuted",
+              selectedJobId === item.id && "border-app-accent/35 ring-2 ring-app-accent/15"
+            )}
             onClick={() => onSelect(item.id)}
           >
             <div className="mb-1 flex items-start justify-between gap-2">

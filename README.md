@@ -4,16 +4,36 @@ Cross-platform desktop downloader for YouTube and other platforms, built with El
 
 ## Screenshots
 
-![StreamFetch Main Interface](Images/FullScreenSS.png)
-![StreamFetch Per-Item Progress](Images/PerIteamProgress.png)
-![StreamFetch Clip Range Feature](Images/ClipVideoFeat.png)
-![StreamFetch yt-dlp Updater](Images/ytdlpupdater.png)
+### Dashboard 01
+
+![StreamFetch Main Dashboard](Images/Dashboard-01.png)
+
+Main dashboard for pasting a link, fetching metadata, selecting clip range, enabling Turbo download, adding items to queue, and using the built-in `yt-dlp` updater.
+
+### Dashboard 02
+
+![StreamFetch Active Queue](Images/Dashboard-02.png)
+
+Active queue workspace with download overview, per-job status, and inline logs for the selected item.
+
+### Dashboard 03
+
+![StreamFetch History Dashboard](Images/Dashboard-03.png)
+
+History dashboard for browsing past downloads, completed items, failed jobs, and archived activity.
+
+### Dashboard 04
+
+![StreamFetch Settings Dashboard](Images/Dashboard-04.png)
+
+Settings workspace for saving defaults, managing clipboard watcher preferences, and checking app/update status.
 
 ## Highlights
 
+- Notion-like desktop workspace with dedicated `New Download`, `Active Queue`, `History`, and `Settings` views
 - Queue-based downloads with per-item progress and logs
 - Pause, resume, cancel, and retry controls
-- Optional clip-range downloads (start/end time)
+- Optional clip-range downloads with structured Clip Studio controls
 - Smart fallback strategy for format/download failures
 - Built-in `yt-dlp` updater
 - In-app app-update notification (checks GitHub latest release)
@@ -33,11 +53,12 @@ StreamFetch now handles restricted content in a guided flow:
 ## Features
 
 - Single video and playlist support
+- Structured workspace shell with sidebar navigation and saved defaults
 - Advanced format picker from extracted format IDs
 - Clip-range download for single videos (`ss`, `mm:ss`, `hh:mm:ss`)
-- Playlist range controls (`start`, `end`, include, exclude)
+- Playlist range controls (`start`, `end`, include, exclude`)
 - Global + per-download speed limits (`500K`, `2M`, `1.5M`)
-- Download history and runtime logs
+- Download history, runtime logs, and active queue overview
 - Frameless desktop UI with custom window controls
 
 ## Tech Stack
@@ -160,4 +181,3 @@ Install from GitHub Releases for the easiest setup. Each tagged release includes
 ## License
 
 MIT
-

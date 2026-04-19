@@ -167,25 +167,70 @@
       <section class="section" id="screenshots">
         <div class="section-head">
           <p class="eyebrow">App Screens</p>
-          <h2>Compact interface with direct control over fetching, acceleration, and recovery</h2>
+          <h2>Large dashboard views that cycle through the full StreamFetch workspace</h2>
         </div>
-        <div class="shot-grid">
-          <figure class="shot-card">
-            <img src="./assets/screenshots/FullScreenSS.png" alt="StreamFetch interface showing fetch controls, options, queue, and logs" />
-            <figcaption>Full app workspace with fetch controls, inline preferences, queue, and logs</figcaption>
-          </figure>
-          <figure class="shot-card">
-            <img src="./assets/screenshots/PerIteamProgress.png" alt="Per-item download cards with progress, speed, ETA, and status" />
-            <figcaption>Per-item queue progress with speed, ETA, status, and recovery controls</figcaption>
-          </figure>
-          <figure class="shot-card">
-            <img src="./assets/screenshots/ClipVideoFeat.png" alt="Clip range download settings with start and end timestamp inputs" />
-            <figcaption>Clip Studio workflow for precise partial-video extraction</figcaption>
-          </figure>
-          <figure class="shot-card">
-            <img src="./assets/screenshots/ytdlpupdater.png" alt="Built-in yt-dlp updater dialog inside StreamFetch" />
-            <figcaption>Built-in maintenance tools to keep extraction current</figcaption>
-          </figure>
+        <div class="shot-showcase">
+          <div class="shot-stage" aria-label="Animated StreamFetch dashboard showcase">
+            <figure class="showcase-card" style="--delay: 0s;">
+              <img src="./assets/screenshots/Dashboard-01.png" alt="Main StreamFetch dashboard with paste link, fetch info, clip range, turbo download, queue action, and yt-dlp updater" />
+              <figcaption>
+                <strong>Dashboard 01</strong>
+                Main dashboard for pasting a link, fetching info, selecting range, enabling Turbo download, and adding items to queue.
+              </figcaption>
+            </figure>
+            <figure class="showcase-card" style="--delay: 6s;">
+              <img src="./assets/screenshots/Dashboard-02.png" alt="Active queue dashboard with download overview and logs" />
+              <figcaption>
+                <strong>Dashboard 02</strong>
+                Active queue view with overview cards, live progress, and detailed logs for the selected download.
+              </figcaption>
+            </figure>
+            <figure class="showcase-card" style="--delay: 12s;">
+              <img src="./assets/screenshots/Dashboard-03.png" alt="History dashboard with past downloads and archive list" />
+              <figcaption>
+                <strong>Dashboard 03</strong>
+                History workspace for browsing past downloads, completed jobs, and archived activity.
+              </figcaption>
+            </figure>
+            <figure class="showcase-card" style="--delay: 18s;">
+              <img src="./assets/screenshots/Dashboard-04.png" alt="Settings dashboard with saved defaults and app updater options" />
+              <figcaption>
+                <strong>Dashboard 04</strong>
+                Settings view for saving defaults, tuning preferences, and checking updater status.
+              </figcaption>
+            </figure>
+          </div>
+
+          <div class="shot-notes">
+            <article class="shot-note">
+              <span>01</span>
+              <div>
+                <h3>Main Dashboard</h3>
+                <p>Paste a link, fetch metadata, trim with Clip Studio, enable Turbo download, and queue the job.</p>
+              </div>
+            </article>
+            <article class="shot-note">
+              <span>02</span>
+              <div>
+                <h3>Active Queue</h3>
+                <p>Monitor the overview, inspect the selected job, and follow logs while downloads are running.</p>
+              </div>
+            </article>
+            <article class="shot-note">
+              <span>03</span>
+              <div>
+                <h3>History</h3>
+                <p>Review previous downloads, failed jobs, and archived activity in one structured list.</p>
+              </div>
+            </article>
+            <article class="shot-note">
+              <span>04</span>
+              <div>
+                <h3>Settings</h3>
+                <p>Save defaults, manage clipboard watcher behavior, and access app and `yt-dlp` updater options.</p>
+              </div>
+            </article>
+          </div>
         </div>
       </section>
 
